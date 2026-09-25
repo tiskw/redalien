@@ -1,0 +1,3464 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// C++ source file: test_main.cxx                                                               ///
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Include the headers of STL.
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <iostream>
+#include <thread>
+
+// Include POSIX headers.
+#include <fcntl.h>
+#include <pty.h>
+#include <unistd.h>
+
+// Include the headers of custom modules.
+#include "async_comp.hxx"
+#include "bash_completer.hxx"
+#include "carapace_service.hxx"
+#include "char_x.hxx"
+#include "cmd_runner.hxx"
+#include "config.hxx"
+#include "dtypes.hxx"
+#include "edit_helper.hxx"
+#include "error.hxx"
+#include "gap_buffer.hxx"
+#include "gen_path_cache.hxx"
+#include "history_manager.hxx"
+#include "main_redalien.hxx"
+#include "mime_type.hxx"
+#include "path_x.hxx"
+#include "preview.hxx"
+#include "read_cmd.hxx"
+#include "string_utils.hxx"
+#include "terminal.hxx"
+#include "text_editor.hxx"
+#include "text_editor_emacs.hxx"
+#include "text_editor_vi.hxx"
+#include "tokenizers.hxx"
+#include "utf8.hxx"
+#include "utils.hxx"
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Global variables
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static bool passed = true;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Utility macros and functions for testing
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define expect(expr) (expect_body((expr), #expr, __LINE__))
+
+static void expect_body(bool expr_bool, const char* expr_str, int line_no)
+{   // {{{
+
+    // Print test result.
+    if (expr_bool) std::cout << "\033[32mPASSED\033[0m";
+    else           std::cout << "\033[31mFAILED\033[0m";
+
+    // Print detailed information.
+    std::cout << ": L." << line_no << ": " << expr_str << std::endl;
+
+    // Update the passed/failed flag.
+    passed &= expr_bool;
+
+}   // }}}
+
+static void print_header(const char* message)
+{   // {{{
+
+    std::cout                                       << std::endl;
+    std::cout << "------------------------------"   << std::endl;
+    std::cout << "\033[33m" << message << "\033[0m" << std::endl;
+    std::cout                                       << std::endl;
+
+}   // }}}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Unittest functions
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static void test_AsyncComp(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for AsyncComp class");
+
+    // Load the test configuration.
+    const RedAlienConfig cfg = load_config("misc/config.toml");
+
+    ////////////////////////////////////////////////////////
+    // Constructor, get_wakeup_fd, and destructor
+    ////////////////////////////////////////////////////////
+    {
+        // Constructing AsyncComp launches the worker thread and creates the wakeup pipe.
+        AsyncComp ac(8, 80, Path("/tmp"), cfg);
+
+        // The read end of the wakeup pipe must be a valid file descriptor.
+        expect(ac.get_wakeup_fd() >= 0);
+
+        // When no task has been processed yet, get_completion_result returns the cached
+        // (initially empty) result without blocking.
+        [[maybe_unused]] const Vector<String> r0 = ac.get_completion_result();
+
+        // Destructor is called here: signals the worker to stop and joins the thread.
+    }
+
+    ////////////////////////////////////////////////////////
+    // launch_async_completion and get_completion_result
+    ////////////////////////////////////////////////////////
+    {
+        AsyncComp ac(8, 80, Path("/tmp"), cfg);
+
+        // Post a completion task for a simple command prefix.
+        ac.launch_async_completion("echo ");
+
+        // Wait for the worker thread to finish processing.
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+        // After the worker finishes, get_completion_result returns the computed result.
+        const Vector<String> r1 = ac.get_completion_result();
+        (void)r1;
+
+        // A second call returns the cached result (has_result is now false).
+        const Vector<String> r2 = ac.get_completion_result();
+        (void)r2;
+
+        // Launching the same input again is a no-op (deduplication by lhs_result).
+        ac.launch_async_completion("echo ");
+
+        // Launching different inputs in quick succession: only the last one should be processed.
+        ac.launch_async_completion("ls ");
+        ac.launch_async_completion("git ");
+
+        // Retrieve the result before the worker finishes (returns cached r2).
+        const Vector<String> r3 = ac.get_completion_result();
+        (void)r3;
+
+        // Wait and retrieve the final result.
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        const Vector<String> r4 = ac.get_completion_result();
+        (void)r4;
+    }
+
+    ////////////////////////////////////////////////////////
+    // Empty string input
+    ////////////////////////////////////////////////////////
+    {
+        AsyncComp ac(8, 80, Path("/tmp"), cfg);
+        ac.launch_async_completion("");
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        [[maybe_unused]] const Vector<String> result = ac.get_completion_result();
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete_sync
+    ////////////////////////////////////////////////////////
+    {
+        AsyncComp ac(8, 80, Path("/tmp"), cfg);
+        const String result = ac.complete_sync("ls /tm");
+        expect(result == "ls /tmp/");
+    }
+
+}   // }}}
+
+static void test_BashCompleter(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for BashCompleter class");
+
+    ////////////////////////////////////////////////////////
+    // Constructor and destructor
+    ////////////////////////////////////////////////////////
+    {
+        // Constructing BashCompleter spawns a bash child process.
+        // Simply constructing and destroying must not throw or crash.
+        BashCompleter bc;
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete: git subcommands with prefix
+    ////////////////////////////////////////////////////////
+    {
+        BashCompleter bc;
+
+        // "git sta" should produce completions containing "status" and/or "stash".
+        // Note: bash-completion may append a trailing space to each candidate.
+        const Vector<String> results = bc.complete("git sta");
+        bool found_status = false;
+        bool found_stash  = false;
+        for (const String& s : results)
+        {
+            // Match with or without trailing space.
+            if (s == "status" || s == "status ") found_status = true;
+            if (s == "stash"  || s == "stash " ) found_stash  = true;
+        }
+        expect(found_status || found_stash);
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete: trailing space returns non-empty list
+    ////////////////////////////////////////////////////////
+    {
+        BashCompleter bc;
+
+        // "git " (with trailing space) should return the full list of git subcommands.
+        const Vector<String> results = bc.complete("git ");
+        expect(!results.empty());
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete: empty input does not crash
+    ////////////////////////////////////////////////////////
+    {
+        BashCompleter bc;
+
+        // An empty string is a degenerate input; complete() must not throw or crash.
+        [[maybe_unused]] const Vector<String> results = bc.complete("");
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete: multiple sequential calls on the same object
+    ////////////////////////////////////////////////////////
+    {
+        BashCompleter bc;
+
+        // The same BashCompleter instance must handle multiple calls correctly.
+        [[maybe_unused]] const Vector<String> r1 = bc.complete("ls --");
+        [[maybe_unused]] const Vector<String> r2 = bc.complete("git ");
+        [[maybe_unused]] const Vector<String> r3 = bc.complete("echo ");
+
+        // Each call must return a Vector (possibly empty) without crashing.
+        expect(true);
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete: input with single-quote character (shell quoting)
+    ////////////////////////////////////////////////////////
+    {
+        BashCompleter bc;
+
+        // Input that contains a single-quote must be shell-quoted correctly and
+        // must not cause the child bash process to hang or crash.
+        [[maybe_unused]] const Vector<String> results = bc.complete("echo 'hello");
+    }
+
+}   // }}}
+
+static void test_CarapaceService(void)
+{   // {{{
+    // Print header.
+    print_header("Unit test for CarapaceService class");
+
+    CarapaceService service;
+
+    ////////////////////////////////////////////////////////
+    // Fewer than two tokens: the generator yields nothing
+    ////////////////////////////////////////////////////////
+    {
+        const Vector<StringView> tokens = {"git"};
+
+        uint32_t count = 0;
+        for ([[maybe_unused]] const auto& pair : service.complete(tokens))
+            ++count;
+
+        expect(count == 0);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Unknown command: carapace fails, so JSON parsing throws and no candidate is yielded
+    ////////////////////////////////////////////////////////
+    {
+        const Vector<StringView> tokens = {"__no_such_command_xyz__", ""};
+
+        uint32_t count = 0;
+        for ([[maybe_unused]] const auto& pair : service.complete(tokens))
+            ++count;
+
+        expect(count == 0);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Real command: the second identical call must be served from the cache
+    ////////////////////////////////////////////////////////
+    {
+        // The actual candidates depend on the installed carapace specs, so only
+        // the consistency between the first (computed) and second (cached) call is checked.
+        const Vector<StringView> tokens = {"git", "sta"};
+
+        Vector<String> first;
+        for (const auto& [value, display] : service.complete(tokens))
+        {
+            (void) display;
+            first.emplace_back(value);
+        }
+
+        Vector<String> second;
+        for (const auto& [value, display] : service.complete(tokens))
+        {
+            (void) display;
+            second.emplace_back(value);
+        }
+
+        expect(first == second);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Path completion: exercises the directory-first sorting and colorising branch
+    ////////////////////////////////////////////////////////
+    {
+        const Vector<StringView> tokens = {"ls", "/tm"};
+
+        for ([[maybe_unused]] const auto& pair : service.complete(tokens))
+            ;
+
+        expect(true);
+    }
+}   // }}}
+
+static void test_CharX(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for CharX class");
+
+    ////////////////////////////////////////////////////////
+    // ASCII single-byte character
+    ////////////////////////////////////////////////////////
+
+    // Construct from a single ASCII byte and verify basic accessors.
+    CharX cx_ascii("A", 1);
+    expect(cx_ascii.size() == 1);
+    expect(std::strcmp(cx_ascii.c_str(), "A") == 0);
+    expect(cx_ascii.view() == "A");
+
+    // Printable representation of a normal ASCII character is itself.
+    expect(cx_ascii.printable() == "A");
+
+    ////////////////////////////////////////////////////////
+    // Multi-byte UTF-8 character
+    ////////////////////////////////////////////////////////
+
+    // "あ" is U+3042, encoded in 3 bytes: 0xE3 0x81 0x82.
+    const char* hiragana_a = "あ";
+    CharX cx_mb(hiragana_a, 3);
+    expect(cx_mb.size() == 3);
+    expect(cx_mb.view() == "あ");
+
+    // Multi-byte characters are printed as-is.
+    expect(cx_mb.printable() == "あ");
+
+    ////////////////////////////////////////////////////////
+    // Control character (caret notation)
+    ////////////////////////////////////////////////////////
+
+    // Ctrl-A (0x01) should be printed as "^A".
+    CharX cx_ctrl("\x01", 1);
+    expect(cx_ctrl.size() == 1);
+    expect(cx_ctrl.printable() == "^A");
+
+    // Ctrl-C (0x03) should be printed as "^C".
+    CharX cx_ctrl_c("\x03", 1);
+    expect(cx_ctrl_c.printable() == "^C");
+
+    ////////////////////////////////////////////////////////
+    // DEL character (0x7F)
+    ////////////////////////////////////////////////////////
+
+    // DEL (0x7F) should be printed as "^?".
+    CharX cx_del("\x7F", 1);
+    expect(cx_del.size() == 1);
+    expect(cx_del.printable() == "^?");
+
+    ////////////////////////////////////////////////////////
+    // Null / zero-size character
+    ////////////////////////////////////////////////////////
+
+    // A CharX with a null pointer or zero byte size should yield empty printable string.
+    CharX cx_null(nullptr, 0);
+    expect(cx_null.size() == 0);
+    expect(cx_null.printable() == "");
+
+}   // }}}
+
+static void test_CmdRunner(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for cmd_runner.cxx");
+
+    ////////////////////////////////////////////////////////
+    // run_command(StringView): capture output
+    ////////////////////////////////////////////////////////
+    {
+        // A simple echo command returns its argument as a stripped string.
+        const String result = run_command("echo hello", RUN_COMMAND_GETOUT);
+        expect(result == "hello");
+    }
+
+    ////////////////////////////////////////////////////////
+    // run_command(Vector<String>): capture output
+    ////////////////////////////////////////////////////////
+    {
+        // The Vector<String> overload passes each token as a separate argument.
+        const Vector<String> cmd = {"echo", "world"};
+        const String result = run_command(cmd, RUN_COMMAND_GETOUT);
+        expect(result == "world");
+    }
+
+    ////////////////////////////////////////////////////////
+    // run_command(Vector<StringView>): capture output
+    ////////////////////////////////////////////////////////
+    {
+        // The Vector<StringView> overload converts tokens to String before exec.
+        const Vector<StringView> cmd = {"echo", "test"};
+        const String result = run_command(cmd, RUN_COMMAND_GETOUT);
+        expect(result == "test");
+    }
+
+    ////////////////////////////////////////////////////////
+    // RUN_COMMAND_NO_STRIP: preserve trailing newline
+    ////////////////////////////////////////////////////////
+    {
+        // Without stripping, echo's trailing newline is preserved.
+        const RunCommandOption opt =
+            static_cast<RunCommandOption>(RUN_COMMAND_GETOUT | RUN_COMMAND_NO_STRIP);
+        const String result = run_command("echo hello", opt);
+        expect(result == "hello\n");
+    }
+
+    ////////////////////////////////////////////////////////
+    // RUN_COMMAND_PLAIN: fire-and-forget without capturing output
+    ////////////////////////////////////////////////////////
+    {
+        // A plain run always returns an empty string.
+        const String result = run_command("true", RUN_COMMAND_PLAIN);
+        expect(result == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // WIFSIGNALED: child process killed by a signal
+    ////////////////////////////////////////////////////////
+    {
+        // "bash -c 'kill -9 $$'" sends SIGKILL to the bash subprocess itself.
+        // run_command must handle the WIFSIGNALED exit status gracefully.
+        const Vector<String> cmd = {"bash", "-c", "kill -9 $$"};
+        run_command(cmd, RUN_COMMAND_GETOUT);
+        run_command(cmd, RUN_COMMAND_PLAIN);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Non-existent command: execvp fails in the child process
+    ////////////////////////////////////////////////////////
+    {
+        // When the command cannot be found, the child calls _exit() after execvp fails.
+        // The parent should still get a well-defined exit status.
+        const Vector<String> bad_cmd = {"__nonexistent_command_xyz_test__"};
+        run_command(bad_cmd, RUN_COMMAND_GETOUT);
+        run_command(bad_cmd, RUN_COMMAND_PLAIN);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Empty command: returns an empty string without forking
+    ////////////////////////////////////////////////////////
+    {
+        const Vector<String> empty_tokens;
+        expect(run_command(empty_tokens, RUN_COMMAND_GETOUT) == "");
+
+        // The StringView overload tokenizes to an empty vector as well.
+        expect(run_command("", RUN_COMMAND_GETOUT) == "");
+        expect(run_command("   ", RUN_COMMAND_GETOUT) == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Quoted argument: tokenize() removes the surrounding quotes
+    ////////////////////////////////////////////////////////
+    {
+        expect(run_command("echo 'a b'", RUN_COMMAND_GETOUT) == "a b");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Output larger than the 1 MiB limit: the child is terminated with SIGTERM
+    ////////////////////////////////////////////////////////
+    {
+        // "yes" writes an unbounded amount of data, so run_command must cap the
+        // captured output and kill the child process instead of blocking forever.
+        const Vector<String> cmd = {"yes"};
+        const String result = run_command(cmd, RUN_COMMAND_GETOUT);
+        std::cout << result.size() << " bytes captured from 'yes' command" << std::endl;
+        expect(result.size() >= 500000);
+    }
+
+}   // }}}
+
+static void test_EditHelper(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for EditHelper class");
+
+    // Load the test configuration (includes GREP entry for cat command).
+    const RedAlienConfig cfg = load_config("misc/config.toml");
+
+    ////////////////////////////////////////////////////////
+    // Constructor: basic construction
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        expect(true);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("") → NONE → cands_filepath with empty tokens
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("./") → PATH (starts with ./~) → cands_filepath
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("./");
+        // Must return area_height lines; some files/dirs should be found.
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("ls") → COMMAND (.+) → cands_command
+    ////////////////////////////////////////////////////////
+    {
+        const Path path_cmnd_info = Path("/tmp/cmnd_info.txt");
+        const Path path_bash_info = Path("/tmp/bash_info.txt");
+        std::ofstream ofs1(path_cmnd_info);
+        ofs1 << "cat" << std::endl;
+        ofs1 << "ls"  << std::endl;
+        ofs1.close();
+        std::ofstream ofs2(path_bash_info);
+        ofs2 << "alias" << std::endl;
+        ofs2.close();
+
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("ls");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("ls ") → PATH (>> .*) → cands_filepath with trailing space
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("ls ");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("ls --") → OPTION (>> -.*) → cands_option
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("ls --");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("cat Makefile ") → PREVIEW (>> FILE "") → cands_filepath + cands_preview
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        // Makefile exists in the tests/ working directory.
+        const Vector<String> lines = eh.candidate("cat Makefile ");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("git ") → SUBCMD+BASHCOMP → cands_subcmd
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("git ");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("apt ") → SUBCMD → cands_subcmd
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("apt ");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("make ") → SHELL (make .*) → cands_shell
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("make ");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("cat area") → GREP (cat .*) → cands_grep
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("cat area");
+        expect(lines.size() == (size_t) cfg.area_height);
+
+        // "area_height" from misc/config.toml should be a candidate.
+        bool found_area_height = false;
+        for (const String& line : lines)
+            if (line.find("area_height") != String::npos)
+                found_area_height = true;
+        expect(found_area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // candidate("systemctl ") → BASHCOMP (systemctl .*) → cands_bashcomp
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("systemctl ");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Cache hit: cache_cands_lhs (same lhs called twice)
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines1 = eh.candidate("git ");
+        const Vector<String> lines2 = eh.candidate("git ");   // cache hit on lhs
+        expect(lines1 == lines2);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Cache hit: cache_cands_mat (different lhs, same pattern match)
+    // "git pu" and "git " both match [["git", ".*"], subcmd] with same token hash
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        // "git st" – matching SUBCMD pattern for git, first token "git"
+        [[maybe_unused]] const Vector<String> lines1 = eh.candidate("git st");
+        // "git " – same pattern but different lhs; if hash_mat is the same, cache_cands_mat hits
+        // (This exercises the mat-cache path when different lhs leads to same matched tokens.)
+        [[maybe_unused]] const Vector<String> lines2 = eh.candidate("git ");
+        expect(lines1.size() == (size_t) cfg.area_height);
+        expect(lines2.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete(): no candidates → returns lhs unchanged
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        eh.candidate("xyzzy_nonexistent_cmd ");  // populates cands (empty)
+        const String result = eh.complete("xyzzy_nonexistent_cmd ");
+        expect(result == "xyzzy_nonexistent_cmd ");
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete(): empty lhs → returns empty string
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        eh.candidate("");
+        const String result = eh.complete("");
+        expect(result == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete(): single candidate (no trailing slash) → appends space
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        // "cat column_padding" → GREP → only "column_padding" matches
+        eh.candidate("cat column_pad");
+        const String result = eh.complete("cat column_pad");
+        // Result must start with "cat " and end with "column_padding "
+        expect(result.starts_with("cat "));
+        expect(result.find("column_padding") != String::npos);
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete(): multiple candidates → returns common prefix
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        // "git " → multiple subcmd candidates starting differently
+        eh.candidate("git ");
+        const String result = eh.complete("git ");
+        // Result should not crash and be a string starting with "git "
+        expect(result.starts_with("git "));
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete(): single directory candidate (trailing slash)
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        // "./source" should match the "source/" directory uniquely (if it exists).
+        eh.candidate("./source");
+        const String result = eh.complete("./source");
+        // Result should be "source/" (path only) or "./source/"
+        expect(result.find("source") != String::npos);
+    }
+
+    ////////////////////////////////////////////////////////
+    // columnize: area larger than number of items (all fit in one column)
+    // Exercised indirectly via candidate() on a short list.
+    ////////////////////////////////////////////////////////
+    {
+        // Use a very wide area so all candidates fit in one row.
+        EditHelper eh(8, 200, Path("/tmp"), cfg);
+        const Vector<String> lines = eh.candidate("cat area");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // BASHCOMP: candidate("tar xvf") falls through to bashcomp
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        // "tar xvf" has no specific entry and the last token "xvf" is non-empty,
+        // non-dash, not an existing file -> matches [[">>", ".*"], "bashcomp", ""].
+        const Vector<String> lines = eh.candidate("tar xvf");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // BASHCOMP: cache_cands_lhs hit on identical input
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines1 = eh.candidate("tar xvf");
+        const Vector<String> lines2 = eh.candidate("tar xvf");  // lhs-cache hit
+        expect(lines1 == lines2);
+    }
+
+    ////////////////////////////////////////////////////////
+    // BASHCOMP: no cache_cands_mat collision across different commands
+    // "pip xvf" and "tar xvf" share the same last token but must not share
+    // the mat-cache, so neither call should crash or return wrong data.
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines_tar = eh.candidate("tar xvf");
+        const Vector<String> lines_pip = eh.candidate("pip xvf");
+        // Both calls must return area_height lines without crashing.
+        expect(lines_tar.size() == (size_t) cfg.area_height);
+        expect(lines_pip.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete() before candidate(): the input is returned unchanged
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper helper(8, 80, Path("/tmp"), cfg);
+
+        // No candidate has been computed yet, so the internal pointer is still null.
+        expect(helper.complete("ls ") == "ls ");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Cache eviction: more than 256 distinct inputs clear the internal caches
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper helper(8, 80, Path("/tmp"), cfg);
+
+        for (int32_t idx = 0; idx < 300; ++idx)
+            helper.candidate("ls ./no_such_prefix_" + std::to_string(idx));
+
+        // The helper must keep working normally after the caches have been cleared.
+        const Vector<String> lines = helper.candidate("ls ./");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Completion of a token that matches nothing
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper helper(8, 80, Path("/tmp"), cfg);
+
+        // No file starts with this prefix, so the candidate list is empty and
+        // complete() must return the input unchanged.
+        helper.candidate("ls ./__no_such_file_prefix__");
+        expect(helper.complete("ls ./__no_such_file_prefix__") == "ls ./__no_such_file_prefix__");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Hidden files are listed only when the query starts with a dot
+    ////////////////////////////////////////////////////////
+    {
+        EditHelper helper(8, 80, Path("/tmp"), cfg);
+        const Vector<String> lines = helper.candidate("ls .");
+        expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+}   // }}}
+
+static void test_error(void)
+{   // {{{
+    // Print header.
+    print_header("Unit test for error.cxx");
+
+    ////////////////////////////////////////////////////////
+    // print_error: message is written to stderr when the TUI is inactive
+    ////////////////////////////////////////////////////////
+    {
+        // The macro always returns EXIT_FAILURE so that it can be used in a return statement.
+        expect(print_error("Error", "test message written directly to stderr") == EXIT_FAILURE);
+    }
+
+    ////////////////////////////////////////////////////////
+    // set_tui_active: messages are queued while the TUI is active
+    ////////////////////////////////////////////////////////
+    {
+        // While the TUI is active, error messages must not be printed immediately,
+        // otherwise they would corrupt the drawing area.
+        set_tui_active(true);
+        expect(print_error("Warning", "pending message 1") == EXIT_FAILURE);
+        expect(print_error("Warning", "pending message 2") == EXIT_FAILURE);
+
+        // Deactivating the TUI flushes all pending messages to stderr.
+        set_tui_active(false);
+
+        // A second deactivation has nothing to flush (early-return path).
+        set_tui_active(false);
+    }
+
+    ////////////////////////////////////////////////////////
+    // print_error_and_exit: throws std::runtime_error
+    ////////////////////////////////////////////////////////
+    {
+        bool thrown = false;
+        try
+        {
+            print_error_and_exit("Error", "fatal message (expected to throw)");
+        }
+        catch (const std::runtime_error&)
+        {
+            thrown = true;
+        }
+        expect(thrown);
+    }
+}   // }}}
+
+static void test_GapBuffer(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for GapBuffer class");
+
+    ////////////////////////////////////////////////////////
+    // Getter
+    ////////////////////////////////////////////////////////
+
+    GapBuffer gap_buffer("this is a ペン, ", "that is an りんご.");
+    expect(gap_buffer.count() == 29);
+    expect(gap_buffer.cursor() == 14);
+    expect(gap_buffer.lhs_view() == "this is a ペン, ");
+    expect(gap_buffer.rhs_view() == "that is an りんご.");
+    expect(gap_buffer.serialize() == "this is a ペン, that is an りんご.");
+    expect(gap_buffer.size() == 39);
+
+    ////////////////////////////////////////////////////////
+    // Move cursor
+    ////////////////////////////////////////////////////////
+
+    gap_buffer.set("Here is Tokyo, ", "ここは東京。");
+    gap_buffer.move_cursor(-3);
+    expect(gap_buffer.lhs_view() == "Here is Toky");
+    expect(gap_buffer.rhs_view() == "o, ここは東京。");
+    gap_buffer.move_cursor(+6);
+    expect(gap_buffer.lhs_view() == "Here is Tokyo, ここは");
+    expect(gap_buffer.rhs_view() == "東京。");
+
+    gap_buffer.set("Here is Tokyo, ", "ここは東京。");
+    gap_buffer.move_top();
+    std::cout << gap_buffer.lhs_view() << "/" << gap_buffer.rhs_view() << std::endl;
+    expect(gap_buffer.lhs_view() == "");
+    expect(gap_buffer.rhs_view() == "Here is Tokyo, ここは東京。");
+    gap_buffer.move_end();
+    std::cout << gap_buffer.lhs_view() << "/" << gap_buffer.rhs_view() << std::endl;
+    expect(gap_buffer.lhs_view() == "Here is Tokyo, ここは東京。");
+    expect(gap_buffer.rhs_view() == "");
+
+    ////////////////////////////////////////////////////////
+    // Backspace and deletekey
+    ////////////////////////////////////////////////////////
+
+    // Backspace.
+    gap_buffer.set("aあbいcうdえeお", "<END>");
+    gap_buffer.backspace(1);
+    expect(gap_buffer.serialize() == "aあbいcうdえe<END>");
+    gap_buffer.backspace(2);
+    expect(gap_buffer.serialize() == "aあbいcうd<END>");
+    gap_buffer.backspace(3);
+    expect(gap_buffer.serialize() == "aあbい<END>");
+    gap_buffer.backspace(4);
+    expect(gap_buffer.serialize() == "<END>");
+
+    // Deletekey.
+    gap_buffer.set("<START>", "aあbいcうdえeお");
+    gap_buffer.deletekey(2);
+    expect(gap_buffer.serialize() == "<START>bいcうdえeお");
+    gap_buffer.deletekey(3);
+    expect(gap_buffer.serialize() == "<START>うdえeお");
+    gap_buffer.deletekey(4);
+    expect(gap_buffer.serialize() == "<START>お");
+
+    // Large number (clamp at buffer size).
+    gap_buffer.set("Here is Tokyo, ", "ここは東京。");
+    gap_buffer.backspace(100);
+    gap_buffer.deletekey(100);
+    expect(gap_buffer.lhs_view() == "");
+    expect(gap_buffer.rhs_view() == "");
+
+    ////////////////////////////////////////////////////////
+    // Insert
+    ////////////////////////////////////////////////////////
+
+    gap_buffer.set("Here is Tokyo, ", "ここは東京。");
+    gap_buffer.insert("comfortable city, ");
+    expect(gap_buffer.lhs_view() == "Here is Tokyo, comfortable city, ");
+
+    gap_buffer.set("Here is Tokyo, ", "ここは東京。");
+    gap_buffer.insert(String("comfortable city, "));
+    expect(gap_buffer.lhs_view() == "Here is Tokyo, comfortable city, ");
+
+    gap_buffer.insert(nullptr);
+    gap_buffer.insert("", 0);
+    gap_buffer.insert(StringView(""));
+
+    ////////////////////////////////////////////////////////
+    // Erase
+    ////////////////////////////////////////////////////////
+
+    gap_buffer.set("Here is Tokyo, ", "ここは東京。");
+    gap_buffer.erase_lhs();
+    expect(gap_buffer.lhs_view() == "");
+
+    gap_buffer.set("Here is Tokyo, ", "ここは東京。");
+    gap_buffer.erase_rhs();
+    expect(gap_buffer.rhs_view() == "");
+
+    // Erase all characters.
+    gap_buffer.set("Hello", "World");
+    gap_buffer.erase();
+    expect(gap_buffer.lhs_view() == "");
+    expect(gap_buffer.rhs_view() == "");
+    expect(gap_buffer.count() == 0);
+
+    ////////////////////////////////////////////////////////
+    // Ensure gap (capacity growth)
+    ////////////////////////////////////////////////////////
+
+    gap_buffer.insert(String(10000, 'a'));
+    std::cout << "gap_buffer.capacity() = " << gap_buffer.capacity() << std::endl;
+
+    ////////////////////////////////////////////////////////
+    // Count and cursor tracking
+    ////////////////////////////////////////////////////////
+
+    // After inserting ASCII characters, count reflects the character count.
+    gap_buffer.set("abc", "xyz");
+    expect(gap_buffer.count() == 6);
+    expect(gap_buffer.cursor() == 3);
+
+    // Moving the cursor should update the cursor position.
+    gap_buffer.move_cursor(-2);
+    expect(gap_buffer.cursor() == 1);
+    gap_buffer.move_cursor(+10);  // Clamps at end.
+    expect(gap_buffer.cursor() == 6);
+
+    ////////////////////////////////////////////////////////
+    // Mixed ASCII and multibyte content
+    ////////////////////////////////////////////////////////
+
+    // Verify that count reflects character count, not byte count.
+    gap_buffer.set("日本語", "");
+    expect(gap_buffer.count() == 3);
+    expect(gap_buffer.size() == 9);  // 3 characters * 3 bytes each.
+
+    ////////////////////////////////////////////////////////
+    // Negative counts are ignored by backspace and deletekey
+    ////////////////////////////////////////////////////////
+    {
+        GapBuffer buffer("abc", "def");
+
+        buffer.backspace(-1);
+        buffer.deletekey(-1);
+        expect(buffer.lhs_view() == "abc");
+        expect(buffer.rhs_view() == "def");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Editing at the boundary of the buffer is a no-op
+    ////////////////////////////////////////////////////////
+    {
+        GapBuffer buffer("", "");
+
+        // No character exists on the left of the cursor.
+        buffer.set("", "abc");
+        buffer.backspace(1);
+        expect(buffer.rhs_view() == "abc");
+
+        // No character exists on the right of the cursor.
+        buffer.set("abc", "");
+        buffer.deletekey(1);
+        expect(buffer.lhs_view() == "abc");
+
+        // Moving the cursor by zero characters changes nothing.
+        buffer.move_cursor(0);
+        expect(buffer.cursor() == 3);
+
+        // Moving beyond the boundary is clipped.
+        buffer.move_cursor(-100);
+        expect(buffer.cursor() == 0);
+        buffer.move_cursor(100);
+        expect(buffer.cursor() == 3);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Erasing an already empty buffer is safe
+    ////////////////////////////////////////////////////////
+    {
+        GapBuffer buffer("", "");
+
+        buffer.erase_lhs();
+        buffer.erase_rhs();
+        buffer.erase();
+        expect(buffer.count() == 0);
+        expect(buffer.size() == 0);
+        expect(buffer.capacity() > 0);
+    }
+
+}   // }}}
+
+static void test_GenPathCache(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for gen_path_cache.cxx");
+
+    ////////////////////////////////////////////////////////
+    // Generate the PATH-command cache from the test configuration
+    ////////////////////////////////////////////////////////
+
+    // Generating the cache should succeed (PATH is expected to be set in the test environment).
+    const int32_t ret = generate_path_commands_cache();
+    expect(ret == EXIT_SUCCESS);
+
+    ////////////////////////////////////////////////////////
+    // The PATH environment variable is not set
+    ////////////////////////////////////////////////////////
+    {
+        // Back up PATH so that all subsequent tests keep working.
+        const char*  path_ptr    = std::getenv("PATH");
+        const String path_backup = (path_ptr != nullptr) ? String(path_ptr) : String("");
+
+        unsetenv("PATH");
+        expect(generate_path_commands_cache() == EXIT_FAILURE);
+
+        // Restore PATH immediately, because later tests spawn external commands.
+        setenv("PATH", path_backup.c_str(), 1);
+        expect(std::getenv("PATH") != nullptr);
+    }
+
+}   // }}}
+
+static void test_HistManager(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for HistManager class");
+
+    ////////////////////////////////////////////////////////
+    // Basic history completion
+    ////////////////////////////////////////////////////////
+
+    const Deque<String> hists = {"git status", "git diff", "ls -la", "git commit -m 'fix'"};
+    HistManager hm(hists);
+
+    // Prefix "git" matches the most recent entry starting with "git" ("git commit -m 'fix'").
+    StringView result = hm.complete("git");
+    expect(result == " commit -m 'fix'");
+
+    // More specific prefix "git d" matches "git diff".
+    result = hm.complete("git d");
+    expect(result == "iff");
+
+    // Exact match returns the suffix (empty, since lhs is not included in result).
+    result = hm.complete("ls -la");
+    expect(result == "");
+
+    ////////////////////////////////////////////////////////
+    // No matching history
+    ////////////////////////////////////////////////////////
+
+    // A prefix that matches nothing should return an empty string.
+    result = hm.complete("docker");
+    expect(result == "");
+
+    ////////////////////////////////////////////////////////
+    // Empty query
+    ////////////////////////////////////////////////////////
+
+    // An empty prefix should return an empty string (no meaningful completion).
+    result = hm.complete("");
+    expect(result == "");
+
+    ////////////////////////////////////////////////////////
+    // Empty history
+    ////////////////////////////////////////////////////////
+
+    const Deque<String> empty_hists;
+    HistManager hm_empty(empty_hists);
+    result = hm_empty.complete("ls");
+    expect(result == "");
+
+    ////////////////////////////////////////////////////////
+    // Most recent match wins (reverse search)
+    ////////////////////////////////////////////////////////
+
+    const Deque<String> hists2 = {"ls /tmp", "ls /home", "ls /usr"};
+    HistManager hm2(hists2);
+
+    // "ls " matches the most recently added entry "ls /usr".
+    result = hm2.complete("ls ");
+    expect(result == "/usr");
+
+}   // }}}
+
+static void test_MimeType(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for MimeType class");
+
+    MimeType mime;
+
+    ////////////////////////////////////////////////////////
+    // File extension based MIME type lookup
+    ////////////////////////////////////////////////////////
+
+    // Common text/source file extensions.
+    expect(mime.get("file.txt")  != "");
+    expect(mime.get("file.html") != "");
+    expect(mime.get("file.py")   != "");
+
+    // Unknown/no extension falls back to text/plain.
+    expect(mime.get("Makefile") == "text/plain");
+    expect(mime.get("noextension") == "text/plain");
+
+    ////////////////////////////////////////////////////////
+    // Directory
+    ////////////////////////////////////////////////////////
+
+    // Existing directory should be identified as inode/directory.
+    expect(mime.get(".") == "inode/directory");
+
+    ////////////////////////////////////////////////////////
+    // Image / binary types
+    ////////////////////////////////////////////////////////
+
+    // PNG and JPEG are well-known MIME types.
+    const String png_mime  = mime.get("image.png");
+    const String jpeg_mime = mime.get("photo.jpg");
+    expect(png_mime.find("image") != String::npos or png_mime == "text/plain");
+    expect(jpeg_mime.find("image") != String::npos or jpeg_mime == "text/plain");
+
+}   // }}}
+
+static void test_PathX(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for PathX class");
+
+    // Test 1: parent path.
+    expect(PathX("~/workspace/Makefile").parent_path() == PathX("~/workspace"));
+    expect(PathX("~/workspace/Makefile").parent_path() != PathX("~/workspace/"));
+    expect(PathX("").parent_path() == PathX(""));
+
+    // Test 2: split_to_target_and_query (no target).
+    Vector<StringView> tokens1;
+    tokens1.push_back("ls");
+    tokens1.push_back(" ");
+    auto [path1, name1] = split_to_target_and_query(tokens1);
+    expect(path1 == PathX(""));
+    expect(name1 == "");
+
+    // Test 3: split_to_target_and_query (target is a file).
+    Vector<StringView> tokens2;
+    tokens2.push_back("ls");
+    tokens2.push_back(" ");
+    tokens2.push_back("../develop/nishiki");
+    auto [path2, name2] = split_to_target_and_query(tokens2);
+    expect(path2 == PathX("../develop"));
+    expect(name2 == "nishiki");
+
+    // Test 4: split_to_target_and_query (target is a directory).
+    std::vector<StringView> tokens3;
+    tokens3.push_back("ls");
+    tokens3.push_back(" ");
+    tokens3.push_back("../develop/nishiki/");
+    auto [path3, name3] = split_to_target_and_query(tokens3);
+    expect(path3 == PathX("../develop/nishiki"));
+    expect(name3 == "");
+
+    // Test 5: listdir.
+    expect(PathX("").listdir().size() > 0);
+    expect(PathX("/not_exists").listdir().size() == 0);
+    expect(PathX(".").listdir(1).size() == 1);
+
+    // The contents of the home directory are environment dependent, so only
+    // the fact that the call succeeds without throwing is verified here.
+    [[maybe_unused]] const Vector<String> entries = PathX("~").listdir();
+
+    // A regular file is not a directory, hence an empty result.
+    expect(PathX("test_main.cxx").listdir().size() == 0);
+
+    // Directories are listed first and each entry ends with a slash.
+    {
+        const Vector<String> entries = PathX(".").listdir();
+        expect(entries.size() > 0);
+
+        // Once a non-directory entry appears, no directory entry may follow.
+        bool seen_file  = false;
+        bool ordered_ok = true;
+        for (const String& entry : entries)
+        {
+            const bool is_dir = (entry.size() > 0) and (entry.back() == '/');
+            if (is_dir and seen_file) ordered_ok = false;
+            if (not is_dir)           seen_file  = true;
+        }
+        expect(ordered_ok);
+    }
+
+    // split_to_target_and_query: an empty token list falls back to an empty path
+    {
+        const Vector<StringView> tokens;
+        const auto [path, query] = split_to_target_and_query(tokens);
+        expect(path == PathX(""));
+        expect(query == "");
+    }
+
+}   // }}}
+
+static void test_preview(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for preview function");
+
+    // An empty previews map is passed to use the default preview behavior.
+    StrVecMap previews;
+
+    // Test 1: preview non-existing file returns empty result.
+    expect(preview("/unexisting_file", 100, previews).size() == 0);
+
+    // Test 2: preview of an existing text file returns non-empty result.
+    expect(preview("test_main.cxx", 100, previews).size() > 0);
+
+    // User-defined preview command ({path} is replaced by the target path)
+    {
+        const StrVecMap previews = {
+            {"inode/directory", {"ls",   "{path}"}},
+            {"text/*",          {"echo", "{path}"}},
+        };
+
+        // Text file: the output of the user command is returned line by line.
+        const Vector<String> lines_txt = preview("test_main.cxx", 4, previews);
+        expect(lines_txt.size() > 0);
+        expect(lines_txt[0].find("test_main.cxx") != String::npos);
+
+        // Directory: the command registered for "inode/directory" is used, and
+        // the number of returned lines never exceeds the requested height.
+        const Vector<String> lines_dir = preview(".", 3, previews);
+        expect(lines_dir.size() > 0);
+        expect(lines_dir.size() <= 3);
+    }
+
+    // Default preview: no matching command is registered
+    {
+        const StrVecMap previews;
+
+        // A text file is read directly (up to the first 1 KiB).
+        const Vector<String> lines = preview("Makefile", 5, previews);
+        expect(lines.size() > 0);
+        expect(lines.size() <= 5);
+    }
+
+    // Default preview: a binary file is summarised by its size
+    {
+        const char* path_bin = "/tmp/redalien_test_dummy.png";
+
+        // Write a minimal PNG signature so that the MIME type is resolved as image/png.
+        {
+            std::ofstream ofs(path_bin, std::ios::binary);
+            ofs.write("\x89PNG\r\n\x1A\n", 8);
+        }
+
+        const StrVecMap previews;
+        const Vector<String> lines = preview(path_bin, 5, previews);
+        expect(lines.size() > 0);
+
+        // The binary branch is taken only when the MIME database is available,
+        // so the exact contents are asserted only in that case.
+        MimeType mime;
+        if (mime.get(path_bin) != "text/plain")
+            expect(lines[0].find("Binary") != String::npos);
+
+        std::remove(path_bin);
+    }
+
+    // A preview command that produces no output yields an empty result
+    {
+        const StrVecMap previews = {
+            {"text/*", {"true"}}
+        };
+        expect(preview("Makefile", 5, previews).size() == 0);
+    }
+
+}   // }}}
+
+static void test_RedAlienConfig(void)
+{   // {{{
+
+    // Exercise the config loader with a broken, typo-containing, and valid config file.
+    // Mainly ensures no crash occurs even with malformed input.
+    load_config("misc/config_broken.toml");
+    load_config("misc/config_typo.toml");
+    load_config("misc/config.toml");
+
+    // Path to temporary config file used for testing.
+    const char* path_cfg = "/tmp/redalien_test_config_ext.toml";
+
+    // Write a config file that covers every completion type, every malformed-entry
+    // branch, and the range checks applied after parsing.
+    {
+        std::ofstream ofs(path_cfg);
+        ofs << R"TOML(
+[GENERAL]
+area_height    = 1000
+column_padding = 3
+undefined_key  = "this entry name does not exist"
+
+[PROMPT]
+ps0l = "L"
+ps0r = "R"
+ps1i = "i"
+ps1n = "n"
+ps2  = "2"
+undefined_prompt_key = "x"
+
+[KEYBIND]
+"^X" = "echo keybind"
+
+[COMPLETION]
+completions = [
+    [["a01", ">>"], "bashcomp",        ""],
+    [["a02", ">>"], "carapace",        ""],
+    [["a03", ">>"], "command",         ""],
+    [["a04", ">>"], "grep",            "file\tpattern"],
+    [["a05", ">>"], "option",          ""],
+    [["a06", ">>"], "path",            ""],
+    [["a07", ">>"], "preview",         ""],
+    [["a08", ">>"], "shell",           "echo"],
+    [["a09", ">>"], "subcmd",          "echo"],
+    [["a10", ">>"], "subcmd+bashcomp", "echo"],
+    [["a11", ">>"], "no_such_type",    ""],
+    "this entry is not an array",
+    [["a12"], "path"],
+]
+
+[PREVIEW]
+previews = [
+    ["text/*", ["cat", "{path}"]],
+    ["this entry has too few items"],
+    ["text/plain", "this entry is not an array"],
+]
+preview_delim = " | "
+preview_ratio = 2.0
+
+[PLUGIN_SOMETHING]
+ignored_by_redalien = 1
+
+[NO_SUCH_SECTION]
+some_key = 1
+)TOML";
+    }
+
+    const RedAlienConfig cfg = load_config(path_cfg);
+
+    ////////////////////////////////////////////////////////
+    // Range checks: out-of-range values are clipped with a warning
+    ////////////////////////////////////////////////////////
+    expect(cfg.area_height == 256);
+    expect(cfg.preview_ratio == 1.0f);
+
+    ////////////////////////////////////////////////////////
+    // Prompt strings and keybinds
+    ////////////////////////////////////////////////////////
+    expect(cfg.ps0l == "L");
+    expect(cfg.ps0r == "R");
+    expect(cfg.ps1i == "i");
+    expect(cfg.ps1n == "n");
+    expect(cfg.ps2  == "2");
+    expect(cfg.keybinds.contains("^X"));
+
+    ////////////////////////////////////////////////////////
+    // Completion entries: only the eleven well-formed entries are registered
+    ////////////////////////////////////////////////////////
+    expect(cfg.completions.size() == 11);
+
+    // An unknown completion type falls back to CompType::PATH.
+    expect(std::get<1>(cfg.completions.back()) == CompType::PATH);
+
+    ////////////////////////////////////////////////////////
+    // Preview entries: only the single well-formed entry is registered
+    ////////////////////////////////////////////////////////
+    expect(cfg.previews.size() == 1);
+    expect(cfg.previews.contains("text/*"));
+    expect(cfg.preview_delim == " | ");
+
+    ////////////////////////////////////////////////////////
+    // Non-existent config file: the built-in defaults are used
+    ////////////////////////////////////////////////////////
+    {
+        const RedAlienConfig cfg_default = load_config("/non_existent_config_xyz.toml");
+        expect(cfg_default.area_height == 6);
+        expect(cfg_default.completions.size() == 5);
+        expect(cfg_default.previews.size() == 3);
+    }
+
+    std::remove(path_cfg);
+
+}   // }}}
+
+static void test_string_utils(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for string_utils.cxx");
+
+    ////////////////////////////////////////////////////////
+    // colorize: basic output (visual check, limited iterations)
+    ////////////////////////////////////////////////////////
+
+    const char* str = "echo 'Hello, World!' | grep -i 'hello'";
+    std::cout << str << std::endl;
+    std::cout << colorize(str) << std::endl;
+
+    // Check strange quote.
+    const char* str2 = "echo 'Hello'echo'Hello'if'Hello'|'Hello'";
+    std::cout << str2 << std::endl;
+    std::cout << colorize(str2) << std::endl;
+
+    // Spot-check a few cursor positions to verify insert_cursor/colorize work together.
+    for (int i = 0; i <= 5; ++i)
+        std::cout << insert_cursor(colorize(str), i) << std::endl;
+
+    ////////////////////////////////////////////////////////
+    // width: ASCII and multibyte strings
+    ////////////////////////////////////////////////////////
+
+    // ASCII string: each character has display width 1.
+    expect(width("") == 0);
+    expect(width("abc") == 3);
+    expect(width("Hello") == 5);
+
+    // Japanese characters have display width 2 each.
+    expect(width("あ") == 2);
+    expect(width("日本語") == 6);
+
+    // Mixed ASCII and Japanese.
+    expect(width("aあ") == 3);
+
+    ////////////////////////////////////////////////////////
+    // textclip: clip string to given width
+    ////////////////////////////////////////////////////////
+
+    // Clipping an ASCII string.
+    expect(textclip("Hello", 3) == "Hel");
+    expect(textclip("Hello", 10) == "Hello");
+
+    // Width of 0 means no clipping.
+    expect(textclip("Hello", 0) == "Hello");
+
+    // Clipping at a boundary that falls within a multibyte character.
+    // "あい" has width 4; clipping to 3 should yield only "あ".
+    expect(textclip("あい", 3) == "あ");
+
+    // Clipping exactly at the end of a multibyte character.
+    expect(textclip("あい", 4) == "あい");
+
+    ////////////////////////////////////////////////////////
+    // chunk: split string into width-based chunks
+    ////////////////////////////////////////////////////////
+
+    // Chunk an ASCII string of width 5 into chunks of width 2.
+    {
+        uint32_t count = 0;
+        for (const StringView sv : chunk("Hello", 2))
+        {
+            switch (count++)
+            {
+                case 0: expect(sv == "He"); break;
+                case 1: expect(sv == "ll"); break;
+                case 2: expect(sv == "o");  break;
+                default: expect(false);
+            }
+        }
+        expect(count == 3);
+    }
+
+    // Chunk of width 0 yields the full string as a single chunk.
+    {
+        uint32_t count = 0;
+        for (const StringView sv : chunk("Hello", 0))
+        {
+            expect(sv == "Hello");
+            ++count;
+        }
+        expect(count == 1);
+    }
+
+    // Chunk with multibyte characters: "日本語" has width 6; chunk at width 4 gives "日本" then "語".
+    {
+        uint32_t count = 0;
+        for (const StringView sv : chunk("日本語", 4))
+        {
+            switch (count++)
+            {
+                case 0: expect(sv == "日本"); break;
+                case 1: expect(sv == "語");   break;
+                default: expect(false);
+            }
+        }
+        expect(count == 2);
+    }
+
+    // insert_cursor: edge cases
+    {
+        // An empty string yields a bare cursor.
+        expect(insert_cursor("", 0) == "\x1B[7m \x1B[27m");
+
+        // A cursor position beyond the end of the string leaves the text unchanged.
+        expect(insert_cursor("abc", 10) == "abc");
+
+        // The cursor is placed at the very beginning of the string.
+        expect(insert_cursor("abc", 0).starts_with("\x1B[7m"));
+
+        // The cursor is appended when it sits exactly at the end of the string.
+        expect(insert_cursor("abc", 3).ends_with("\x1B[7m \x1B[27m"));
+
+        // ANSI escape sequences are copied through without consuming cursor width.
+        const String result = insert_cursor("\x1B[31mabc\x1B[0m", 1);
+        expect(result.find("\x1B[31m") != String::npos);
+        expect(result.find("\x1B[7m")  != String::npos);
+    }
+
+    // width: ANSI escape sequences have zero display width
+    {
+        expect(width("\x1B[31mA\x1B[0m") == 1);
+        expect(width("\x1B[0m") == 0);
+    }
+
+    // colorize: quoting edge cases
+    {
+        // An unterminated string literal must still reset the color at the end,
+        // otherwise the color would leak into the rest of the terminal.
+        const String result = colorize("echo 'unterminated");
+        expect(result.ends_with("\x1B[0m"));
+
+        // Parsing stops at the first null character.
+        const String truncated = colorize(StringView("ab\0cd", 5));
+        expect(truncated.find("cd") == String::npos);
+
+        // A word placed immediately before an opening quote is flushed first.
+        expect(colorize("echo'abc'").find("echo") != String::npos);
+
+        // An empty input produces an empty output.
+        expect(colorize("") == "");
+    }
+
+    // chunk: ANSI escape sequences do not count toward the chunk width
+    {
+        uint32_t count = 0;
+        for (const StringView sv : chunk("\x1B[31mabc", 2))
+        {
+            if (count == 0) expect(sv.find("ab") != String::npos);
+            ++count;
+        }
+        expect(count == 2);
+    }
+
+}   // }}}
+
+static void test_TermUserIF_pty(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for TermUserIF with PTY");
+
+    // Open a pseudo-terminal pair.  The slave end is a real TTY device, so TermUserIF can be
+    // constructed and tested without needing an interactive terminal attached to the process.
+    int master_fd, slave_fd;
+    if (openpty(&master_fd, &slave_fd, nullptr, nullptr, nullptr) < 0)
+    {
+        std::cerr << "openpty() failed — skipping PTY-based TermUserIF tests" << std::endl;
+        return;
+    }
+
+    // Replace stdin with the PTY slave (TermUserIF uses STDIN_FILENO for tcgetattr and read).
+    // Replace stdout with /dev/null to suppress terminal escape sequences during the test.
+    const int saved_stdin  = dup(STDIN_FILENO);
+    const int saved_stdout = dup(STDOUT_FILENO);
+    const int devnull_fd   = open("/dev/null", O_WRONLY);
+    dup2(slave_fd, STDIN_FILENO);
+    dup2(devnull_fd, STDOUT_FILENO);
+
+    try
+    {
+        ////////////////////////////////////////////////////////
+        // getch(): simple ASCII character
+        // Exercises the select → read → return path of getch().
+        ////////////////////////////////////////////////////////
+        {
+            TermUserIF term(8, 80);
+
+            // Write 'A' to the master end; the PTY slave (our STDIN) immediately has data.
+            write(master_fd, "A", 1);
+            CharX cx = term.getch(-1);
+            expect(cx.size() == 1);
+            expect(cx.c_str()[0] == 'A');
+        }
+
+        ////////////////////////////////////////////////////////
+        // getch(): complete CSI escape sequence "ESC [ A"
+        // Exercises is_csis() (returns true) and csis_byte_size() success path (lines 58-60).
+        ////////////////////////////////////////////////////////
+        {
+            TermUserIF term(8, 80);
+
+            write(master_fd, "\x1B[A", 3);  // cursor-up CSI sequence
+            [[maybe_unused]] CharX cx = term.getch(-1);
+        }
+
+        ////////////////////////////////////////////////////////
+        // getch(): incomplete CSI sequence "ESC [ 1" (no letter terminator)
+        // Exercises csis_byte_size() fallback return (line 62): the for-loop finds no
+        // letter in positions [2, size), so the function returns 1 (just the ESC byte).
+        ////////////////////////////////////////////////////////
+        {
+            TermUserIF term(8, 80);
+
+            write(master_fd, "\x1B[1", 3);  // CSI without a letter terminator
+            [[maybe_unused]] CharX cx = term.getch(-1);
+        }
+
+        ////////////////////////////////////////////////////////
+        // getch() with wakeup_fd set but only stdin fires (lines 131-132)
+        // Passing a valid wakeup_fd exercises the FD_SET(wakeup_fd) branch.
+        ////////////////////////////////////////////////////////
+        {
+            TermUserIF term(8, 80);
+            int pipefd[2];
+            pipe2(pipefd, O_NONBLOCK);  // non-blocking: mirrors how AsyncComp creates its pipe
+            // Write to STDIN only; pipefd[0] (wakeup_fd) has no data.
+            write(master_fd, "D", 1);
+            [[maybe_unused]] CharX cx = term.getch(pipefd[0]);
+            close(pipefd[0]);
+            close(pipefd[1]);
+        }
+
+        ////////////////////////////////////////////////////////
+        // getch() with wakeup_fd fires but no stdin data (lines 145-150)
+        // When only the wakeup pipe fires, getch() drains it and returns empty.
+        ////////////////////////////////////////////////////////
+        {
+            TermUserIF term(8, 80);
+            int pipefd[2];
+            pipe2(pipefd, O_NONBLOCK);  // non-blocking: required so the drain loop terminates
+            // Write to the wakeup pipe only; STDIN has no data.
+            write(pipefd[1], "w", 1);
+            [[maybe_unused]] CharX cx = term.getch(pipefd[0]);
+            close(pipefd[0]);
+            close(pipefd[1]);
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "PTY test exception: " << e.what() << std::endl;
+    }
+
+    // Restore stdin and stdout.
+    dup2(saved_stdin,  STDIN_FILENO);
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdin);
+    close(saved_stdout);
+    close(master_fd);
+    close(slave_fd);
+    close(devnull_fd);
+
+}   // }}}
+
+static void test_TextEditor(void)
+{   // {{{
+    // Print header.
+    print_header("Unit test for text_editor.cxx (static utilities)");
+
+    using CharClass = TextEditor::CharClass;
+
+    ////////////////////////////////////////////////////////
+    // collect_char_info: byte positions and character classes
+    ////////////////////////////////////////////////////////
+    {
+        // An empty string produces no character information.
+        expect(TextEditor::collect_char_info("").empty());
+    } {
+        // "a あ_" consists of WORD, SPACE, WORD (multi-byte), WORD (underscore).
+        const Vector<TextEditor::CharInfo> chars = TextEditor::collect_char_info("a あ_");
+        expect(chars.size() == 4);
+        expect(chars[0].byte_pos == 0 and chars[0].cls == CharClass::WORD);
+        expect(chars[1].byte_pos == 1 and chars[1].cls == CharClass::SPACE);
+        expect(chars[2].byte_pos == 2 and chars[2].cls == CharClass::WORD);
+        expect(chars[3].byte_pos == 5 and chars[3].cls == CharClass::WORD);
+    } {
+        // Punctuation is classified as OTHER, and a tab is classified as SPACE.
+        const Vector<TextEditor::CharInfo> chars = TextEditor::collect_char_info(".\t1");
+        expect(chars.size() == 3);
+        expect(chars[0].cls == CharClass::OTHER);
+        expect(chars[1].cls == CharClass::SPACE);
+        expect(chars[2].cls == CharClass::WORD);
+    }
+
+    ////////////////////////////////////////////////////////
+    // extract_front / extract_back: UTF-8 aware substring extraction
+    ////////////////////////////////////////////////////////
+    {
+        // Non-positive counts and empty inputs yield an empty string.
+        expect(TextEditor::extract_front("hello", 0) == "");
+        expect(TextEditor::extract_front("hello", -1) == "");
+        expect(TextEditor::extract_front("", 3) == "");
+        expect(TextEditor::extract_back("hello", 0) == "");
+        expect(TextEditor::extract_back("hello", -1) == "");
+        expect(TextEditor::extract_back("", 3) == "");
+    } {
+        // Extraction counts UTF-8 characters, not bytes.
+        expect(TextEditor::extract_front("あい", 1) == "あ");
+        expect(TextEditor::extract_back("あい", 1) == "い");
+        expect(TextEditor::extract_front("aあb", 2) == "aあ");
+        expect(TextEditor::extract_back("aあb", 2) == "あb");
+    } {
+        // A count larger than the character count returns the whole string.
+        expect(TextEditor::extract_front("ab", 10) == "ab");
+        expect(TextEditor::extract_back("ab", 10) == "ab");
+    }
+}   // }}}
+
+static void test_TextEditorEmacs(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for TextEditorEmacs class");
+
+    ////////////////////////////////////////////////////////
+    // Basic character insertion
+    ////////////////////////////////////////////////////////
+    {
+        // ASCII characters are inserted at the cursor position.
+        TextEditorEmacs e("", "", {});
+        e.edit("h"); e.edit("i");
+        expect(e.get_lhs() == "hi");
+        expect(e.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Cursor movement: C-a (BOL) and C-e (EOL)
+    ////////////////////////////////////////////////////////
+    {
+        // C-a moves the cursor to the beginning of the line.
+        TextEditorEmacs e("hello", "", {});
+        e.edit("\x01");
+        expect(e.get_lhs() == "");
+        expect(e.get_rhs() == "hello");
+    } {
+        // C-e moves the cursor to the end of the line.
+        TextEditorEmacs e("", "hello", {});
+        e.edit("\x05");
+        expect(e.get_lhs() == "hello");
+        expect(e.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Cursor movement: C-b (backward) and C-f (forward)
+    ////////////////////////////////////////////////////////
+    {
+        // C-b moves one character backward.
+        TextEditorEmacs e("abc", "", {});
+        e.edit("\x02");
+        expect(e.get_lhs() == "ab");
+        expect(e.get_rhs() == "c");
+    } {
+        // C-f moves one character forward.
+        TextEditorEmacs e("", "abc", {});
+        e.edit("\x06");
+        expect(e.get_lhs() == "a");
+        expect(e.get_rhs() == "bc");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Deletion: C-d (forward), C-h / DEL (backward)
+    ////////////////////////////////////////////////////////
+    {
+        // C-d deletes the character under the cursor.
+        TextEditorEmacs e("", "hello", {});
+        e.edit("\x04");
+        expect(e.get_lhs() == "");
+        expect(e.get_rhs() == "ello");
+    } {
+        // C-h (Backspace) deletes one character backward.
+        TextEditorEmacs e("abc", "", {});
+        e.edit("\x08");
+        expect(e.get_lhs() == "ab");
+    } {
+        // DEL (0x7F) also deletes one character backward.
+        TextEditorEmacs e("abc", "", {});
+        e.edit("\x7F");
+        expect(e.get_lhs() == "ab");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Kill commands: C-k (kill to EOL) and C-u (kill to BOL)
+    ////////////////////////////////////////////////////////
+    {
+        // C-k kills from the cursor to the end of the line.
+        TextEditorEmacs e("ls ", "/tmp", {});
+        e.edit("\x0B");
+        expect(e.get_lhs() == "ls ");
+        expect(e.get_rhs() == "");
+    } {
+        // C-u kills from the beginning of the line to the cursor.
+        TextEditorEmacs e("ls /tmp", "", {});
+        e.edit("\x15");
+        expect(e.get_lhs() == "");
+        expect(e.get_rhs() == "");
+    } {
+        // C-y yanks the most recently killed text back into the buffer.
+        TextEditorEmacs e("hello world", "", {});
+        e.edit("\x15");  // C-u: kill everything → kill_ring = "hello world"
+        e.edit("\x19");  // C-y: paste
+        expect(e.get_lhs() == "hello world");
+    }
+
+    ////////////////////////////////////////////////////////
+    // C-w: kill backward word (whitespace-delimited)
+    ////////////////////////////////////////////////////////
+    {
+        // C-w kills the word immediately before the cursor, including the preceding space.
+        TextEditorEmacs e("ls /tmp", "", {});
+        e.edit("\x17");
+        expect(e.get_lhs() == "ls");
+        expect(e.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // C-t: transpose characters
+    ////////////////////////////////////////////////////////
+    {
+        // C-t swaps the character before the cursor with the one at the cursor.
+        TextEditorEmacs e("ab", "c", {});
+        e.edit("\x14");
+        expect(e.get_lhs() == "acb");
+        expect(e.get_rhs() == "");
+    } {
+        // At end of line C-t swaps the last two characters.
+        TextEditorEmacs e("ab", "", {});
+        e.edit("\x14");
+        expect(e.get_lhs() == "ba");
+        expect(e.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // History navigation: C-p (previous) and C-n (next)
+    ////////////////////////////////////////////////////////
+    {
+        Deque<String> hists = {"cmd1", "cmd2"};
+        TextEditorEmacs e("", "", hists);
+        e.edit("\x10");  // C-p: switch to most-recent history entry "cmd2".
+        expect(e.get_lhs() == "cmd2");
+        e.edit("\x10");  // C-p: switch to older entry "cmd1".
+        expect(e.get_lhs() == "cmd1");
+        e.edit("\x0E");  // C-n: switch back toward current buffer ("cmd2").
+        expect(e.get_lhs() == "cmd2");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Arrow key sequences (3-byte CSI escape sequences)
+    ////////////////////////////////////////////////////////
+    {
+        Deque<String> hists = {"old"};
+        TextEditorEmacs e("abc", "", hists);
+
+        // Up arrow navigates to the previous history entry.
+        e.edit(StringView("\x1B[A", 3));
+        expect(e.get_lhs() == "old");
+
+        // Down arrow returns to the current editing buffer.
+        e.edit(StringView("\x1B[B", 3));
+        expect(e.get_lhs() == "abc");
+
+        // Left arrow moves the cursor one character backward.
+        e.edit(StringView("\x1B[D", 3));
+        expect(e.get_lhs() == "ab");
+        expect(e.get_rhs() == "c");
+
+        // Right arrow moves the cursor one character forward.
+        e.edit(StringView("\x1B[C", 3));
+        expect(e.get_lhs() == "abc");
+        expect(e.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Meta keys (M-f, M-b): word forward and backward
+    ////////////////////////////////////////////////////////
+    {
+        // M-f advances the cursor to the end of the next word.
+        TextEditorEmacs e("", "hello world", {});
+        e.edit("\x1B");  // ESC: arm the meta prefix
+        e.edit("f");     // M-f: advance past "hello"
+        expect(e.get_lhs() == "hello");
+        expect(e.get_rhs() == " world");
+    } {
+        // M-b retreats the cursor to the start of the previous word.
+        TextEditorEmacs e("hello world", "", {});
+        e.edit("\x1B");
+        e.edit("b");     // M-b: retreat past "world"
+        expect(e.get_lhs() == "hello ");
+        expect(e.get_rhs() == "world");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Meta keys (M-d, M-DEL): kill word forward and backward
+    ////////////////////////////////////////////////////////
+    {
+        // M-d kills from the cursor to the end of the next word.
+        TextEditorEmacs e("", "hello world", {});
+        e.edit("\x1B");
+        e.edit("d");     // M-d: kill "hello"
+        expect(e.get_lhs() == "");
+        expect(e.get_rhs() == " world");
+    } {
+        // M-DEL kills from the cursor back to the start of the previous word.
+        TextEditorEmacs e("hello world", "", {});
+        e.edit("\x1B");
+        e.edit("\x7F");  // M-DEL: kill "world"
+        expect(e.get_lhs() == "hello ");
+        expect(e.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Meta keys (M-u/l/c): word case transformation
+    ////////////////////////////////////////////////////////
+    {
+        // M-u uppercases the next word.
+        TextEditorEmacs eu("", "hello", {});
+        eu.edit("\x1B");
+        eu.edit("u");
+        expect(eu.get_lhs() == "HELLO");
+    } {
+        // M-l lowercases the next word.
+        TextEditorEmacs el("", "HELLO", {});
+        el.edit("\x1B");
+        el.edit("l");
+        expect(el.get_lhs() == "hello");
+    } {
+        // M-c capitalizes the next word.
+        TextEditorEmacs ec("", "hello", {});
+        ec.edit("\x1B");
+        ec.edit("c");
+        expect(ec.get_lhs() == "Hello");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Double ESC (M-ESC) and unrecognized Meta key
+    ////////////////////////////////////////////////////////
+    {
+        // M-ESC (double ESC) is a no-op; the buffer is not modified.
+        TextEditorEmacs e("hi", "", {});
+        e.edit("\x1B");
+        e.edit("\x1B");
+        expect(e.get_lhs() == "hi");
+    } {
+        // An unrecognized Meta key inserts the character as-is.
+        TextEditorEmacs e("", "", {});
+        e.edit("\x1B");
+        e.edit("z");  // M-z is unrecognized; 'z' is inserted.
+        expect(e.get_lhs() == "z");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Control characters that are silently ignored
+    ////////////////////////////////////////////////////////
+    {
+        // C-c is not handled by the editor and must not modify the buffer.
+        TextEditorEmacs e("", "", {});
+        e.edit("\x03");
+        expect(e.get_lhs() == "");
+    }
+
+}   // }}}
+
+static void test_TextEditorVi(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for TextEditorVi class");
+
+    ////////////////////////////////////////////////////////
+    // INSERT mode: default state and character insertion
+    ////////////////////////////////////////////////////////
+    {
+        // The editor starts in INSERT mode.
+        TextEditorVi v("", "", {});
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+        v.edit("ab");
+        expect(v.get_lhs() == "ab");
+    } {
+        // ^H (0x08) and DEL (0x7F) both delete one character backward in INSERT mode.
+        TextEditorVi v("abc", "", {});
+        v.edit("\x08");  // ^H: backspace
+        expect(v.get_lhs() == "ab");
+        v.edit("\x7F");  // DEL: backspace
+        expect(v.get_lhs() == "a");
+    } {
+        // Arrow keys in INSERT mode move the cursor.
+        TextEditorVi v("abc", "", {});
+        v.edit(StringView("\x1B[D", 3));  // Left arrow: one char backward.
+        expect(v.get_lhs() == "ab");
+        expect(v.get_rhs() == "c");
+        v.edit(StringView("\x1B[C", 3));  // Right arrow: one char forward.
+        expect(v.get_lhs() == "abc");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Transition: INSERT → NORMAL via ESC
+    ////////////////////////////////////////////////////////
+    {
+        TextEditorVi v("ls ", "", {});
+        v.edit("\x1B");
+        expect(v.get_mode() == TextEditor::Mode::NORMAL);
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: cursor movement (h/l, 0/$)
+    ////////////////////////////////////////////////////////
+    {
+        TextEditorVi v("abc", "", {});
+        v.edit("\x1B");   // → NORMAL
+        v.edit("h");      // h: move one char left
+        expect(v.get_lhs() == "ab");
+        expect(v.get_rhs() == "c");
+        v.edit("l");      // l: move one char right
+        expect(v.get_lhs() == "abc");
+        expect(v.get_rhs() == "");
+    } {
+        TextEditorVi v("abc", "", {});
+        v.edit("\x1B");   // → NORMAL
+        v.edit("0");      // 0: move to beginning of line
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "abc");
+        v.edit("$");      // $: move to end of line
+        expect(v.get_lhs() == "abc");
+        expect(v.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: cursor movement (^: first non-blank)
+    ////////////////////////////////////////////////////////
+    {
+        TextEditorVi v("  hello", "", {});
+        v.edit("\x1B");   // → NORMAL
+        v.edit("^");      // ^: move to first non-blank character
+        expect(v.get_lhs() == "  ");
+        expect(v.get_rhs() == "hello");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: deletion (x/X, D)
+    ////////////////////////////////////////////////////////
+    {
+        // x: delete the character under the cursor (first char of rhs).
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit("x");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "bc");
+    } {
+        // X: backspace (delete one character before the cursor).
+        TextEditorVi v("abc", "", {});
+        v.edit("\x1B");
+        v.edit("X");
+        expect(v.get_lhs() == "ab");
+    } {
+        // D: delete from the cursor to the end of the line.
+        TextEditorVi v("ab", "cd", {});
+        v.edit("\x1B");
+        v.edit("D");
+        expect(v.get_lhs() == "ab");
+        expect(v.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: substitute (S, s) and change-to-EOL (C)
+    ////////////////////////////////////////////////////////
+    {
+        // S: clear the whole line and enter INSERT mode.
+        TextEditorVi v("hello", "", {});
+        v.edit("\x1B");
+        v.edit("S");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    } {
+        // s: delete char at cursor and enter INSERT mode.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit("s");
+        expect(v.get_rhs() == "bc");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    } {
+        // C: yank then delete to end of line, then enter INSERT mode.
+        TextEditorVi v("ab", "cd", {});
+        v.edit("\x1B");
+        v.edit("C");
+        expect(v.get_lhs() == "ab");
+        expect(v.get_rhs() == "");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: mode transitions (i/I/a/A)
+    ////////////////////////////////////////////////////////
+    {
+        // i: enter INSERT mode at the current cursor position.
+        TextEditorVi v("abc", "", {});
+        v.edit("\x1B");
+        v.edit("h");    // move to 'ab|c'
+        v.edit("i");    // INSERT before 'c'
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+        v.edit("X");    // insert 'X'
+        expect(v.get_lhs() == "abX");
+        expect(v.get_rhs() == "c");
+    } {
+        // I: enter INSERT mode at the beginning of the line.
+        TextEditorVi v("abc", "", {});
+        v.edit("\x1B");
+        v.edit("I");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "abc");
+    } {
+        // a: enter INSERT mode after the character at the cursor.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit("a");    // append: cursor moves one char right
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+        expect(v.get_lhs() == "a");
+    } {
+        // A: enter INSERT mode at the end of the line.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit("A");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+        expect(v.get_lhs() == "abc");
+        expect(v.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: word motions (w/b/e, W/B)
+    ////////////////////////////////////////////////////////
+    {
+        // w: advance cursor to the start of the next word.
+        TextEditorVi v("", "hello world", {});
+        v.edit("\x1B");
+        v.edit("w");
+        expect(v.get_lhs() == "hello ");
+        expect(v.get_rhs() == "world");
+    } {
+        // b: retreat cursor to the start of the previous word.
+        TextEditorVi v("hello world", "", {});
+        v.edit("\x1B");
+        v.edit("b");
+        expect(v.get_lhs() == "hello ");
+        expect(v.get_rhs() == "world");
+    } {
+        // e: advance cursor to the last character of the current/next word.
+        TextEditorVi v("", "hello world", {});
+        v.edit("\x1B");
+        v.edit("e");    // cursor lands on 'o' (last char of "hello")
+        expect(v.get_lhs() == "hell");
+        expect(String(v.get_rhs()).starts_with("o"));
+    } {
+        // W: bigword forward (skip non-space sequence including punctuation).
+        TextEditorVi v("", "hello.world foo", {});
+        v.edit("\x1B");
+        v.edit("W");
+        expect(v.get_lhs() == "hello.world ");
+        expect(v.get_rhs() == "foo");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: history navigation (k/j)
+    ////////////////////////////////////////////////////////
+    {
+        Deque<String> hists = {"cmd1", "cmd2"};
+        TextEditorVi v("", "", hists);
+        v.edit("\x1B");   // → NORMAL
+        v.edit("k");      // k: go to most-recent history entry "cmd2"
+        expect(v.get_lhs() == "cmd2");
+        v.edit("k");      // k: go to older entry "cmd1"
+        expect(v.get_lhs() == "cmd1");
+        v.edit("j");      // j: advance toward current buffer ("cmd2")
+        expect(v.get_lhs() == "cmd2");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: case toggle (~)
+    ////////////////////////////////////////////////////////
+    {
+        // ~: toggle the case of the character under the cursor.
+        TextEditorVi v("", "hello", {});
+        v.edit("\x1B");
+        v.edit("~");   // 'h' → 'H'
+        expect(v.get_lhs() == "H");
+        expect(String(v.get_rhs()).starts_with("e"));
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: operator + motion (dd, dw, yy, cc)
+    ////////////////////////////////////////////////////////
+    {
+        // dd: delete the whole line.
+        TextEditorVi v("hello ", "world", {});
+        v.edit("\x1B");
+        v.edit("d");
+        v.edit("d");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "");
+    } {
+        // dw: delete one word forward.
+        TextEditorVi v("", "hello world", {});
+        v.edit("\x1B");
+        v.edit("d");
+        v.edit("w");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "world");
+    } {
+        // yy: yank the whole line (buffer is not modified).
+        TextEditorVi v("hello ", "world", {});
+        v.edit("\x1B");
+        v.edit("y");
+        v.edit("y");
+        expect(v.get_lhs() == "hello ");
+        expect(v.get_rhs() == "world");
+    } {
+        // cc: change whole line (clear buffer and enter INSERT mode).
+        TextEditorVi v("hello ", "world", {});
+        v.edit("\x1B");
+        v.edit("c");
+        v.edit("c");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: replace (r) and paste (p/P)
+    ////////////////////////////////////////////////////////
+    {
+        // r: replace the character under the cursor with the next typed character.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit("r");   // arm the replace operator
+        v.edit("X");   // replace 'a' with 'X'; cursor stays on 'X'
+        expect(v.get_rhs() == "Xbc");
+    } {
+        // p: paste the yank buffer after the cursor.
+        TextEditorVi v("", "xyz", {});
+        v.edit("\x1B");
+        v.edit("y"); v.edit("y");  // yy: yank "xyz"
+        v.edit("d"); v.edit("d");  // dd: delete whole line (buffer now empty)
+        v.edit("p");               // paste yank buffer after cursor
+        expect(v.get_lhs() == "xyz");
+    } {
+        // P: paste the yank buffer before the cursor.
+        TextEditorVi v("", "xyz", {});
+        v.edit("\x1B");
+        v.edit("y"); v.edit("y");  // yy: yank "xyz"
+        v.edit("d"); v.edit("d");  // dd: delete whole line
+        v.edit("P");               // paste before cursor
+        expect(v.get_lhs() == "xyz");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: ESC cancels a pending operator
+    ////////////////////////////////////////////////////////
+    {
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");    // → NORMAL
+        v.edit("d");       // pending_op = 'd'
+        v.edit("\x1B");    // ESC: cancel the pending operator
+        v.edit("x");       // x should delete 'a', not apply 'd'
+        expect(v.get_rhs() == "bc");
+    }
+
+    ////////////////////////////////////////////////////////
+    // Arrow keys in NORMAL mode
+    ////////////////////////////////////////////////////////
+    {
+        TextEditorVi v("abc", "", {});
+        v.edit("\x1B");                   // → NORMAL
+        v.edit(StringView("\x1B[D", 3));  // Left arrow: move one char left.
+        expect(v.get_lhs() == "ab");
+        expect(v.get_rhs() == "c");
+    }
+
+    ////////////////////////////////////////////////////////
+    // INSERT mode: control character encoding (ins_ctrl)
+    ////////////////////////////////////////////////////////
+    {
+        // Ctrl-A (0x01) in INSERT mode is rendered as "^A".
+        TextEditorVi v("", "", {});
+        v.edit("\x01");
+        expect(v.get_lhs() == "^A");
+    } {
+        // Ctrl-C (0x03) in INSERT mode is rendered as "^C".
+        TextEditorVi v("", "", {});
+        v.edit("\x03");
+        expect(v.get_lhs() == "^C");
+    } {
+        // Ctrl-Z (0x1A) in INSERT mode is rendered as "^Z".
+        TextEditorVi v("", "", {});
+        v.edit("\x1A");
+        expect(v.get_lhs() == "^Z");
+    }
+
+    ////////////////////////////////////////////////////////
+    // INSERT mode: Up/Down arrow keys navigate history
+    ////////////////////////////////////////////////////////
+    {
+        Deque<String> hists = {"cmd1", "cmd2"};
+        TextEditorVi v("", "", hists);
+
+        // Up arrow in INSERT mode navigates to most-recent history entry "cmd2".
+        v.edit(StringView("\x1B[A", 3));
+        expect(v.get_lhs() == "cmd2");
+
+        // Down arrow in INSERT mode returns to the editing buffer.
+        v.edit(StringView("\x1B[B", 3));
+        expect(v.get_lhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: B (bigword backward) and E (bigword word-end)
+    ////////////////////////////////////////////////////////
+    {
+        // B: retreat to the start of the previous BIGWORD (treats "hello.world" as one token).
+        TextEditorVi v("hello.world", "", {});
+        v.edit("\x1B");
+        v.edit("B");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "hello.world");
+    } {
+        // B: skip trailing space then the whole bigword.
+        TextEditorVi v("foo bar ", "", {});
+        v.edit("\x1B");
+        v.edit("B");
+        expect(v.get_lhs() == "foo ");
+        expect(v.get_rhs() == "bar ");
+    } {
+        // E: advance to the last character of the current BIGWORD (ignores punctuation boundaries).
+        // "foo.bar baz": E (bigword) stops at 'r', the last char of "foo.bar".
+        TextEditorVi v("", "foo.bar baz", {});
+        v.edit("\x1B");
+        v.edit("E");
+        expect(v.get_lhs() == "foo.ba");
+        expect(String(v.get_rhs()).starts_with("r"));
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: right/down/up arrow keys
+    ////////////////////////////////////////////////////////
+    {
+        // Right arrow in NORMAL mode moves cursor one char right.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit(StringView("\x1B[C", 3));
+        expect(v.get_lhs() == "a");
+        expect(v.get_rhs() == "bc");
+    } {
+        // Down/Up arrow in NORMAL mode navigate history.
+        Deque<String> hists = {"cmd1", "cmd2"};
+        TextEditorVi v("", "", hists);
+        v.edit("\x1B");
+        v.edit(StringView("\x1B[A", 3));  // Up arrow → "cmd2"
+        expect(v.get_lhs() == "cmd2");
+        v.edit(StringView("\x1B[B", 3));  // Down arrow → back to editing buffer
+        expect(v.get_lhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: input with unsupported size is silently ignored
+    ////////////////////////////////////////////////////////
+    {
+        // A 2-byte input (size != 1 and size != 3) must be silently discarded.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit(StringView("xy", 2));
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "abc");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: ~ on uppercase, non-alpha, and empty rhs
+    ////////////////////////////////////////////////////////
+    {
+        // ~ on an uppercase letter toggles it to lowercase and advances the cursor.
+        TextEditorVi v("", "Hello", {});
+        v.edit("\x1B");
+        v.edit("~");
+        expect(v.get_lhs() == "h");   // 'H' → 'h', cursor moved past it
+        expect(String(v.get_rhs()).starts_with("e"));
+    } {
+        // ~ on a non-alpha character (digit) just advances the cursor.
+        TextEditorVi v("", "1abc", {});
+        v.edit("\x1B");
+        v.edit("~");
+        expect(v.get_lhs() == "1");
+        expect(v.get_rhs() == "abc");
+    } {
+        // ~ on empty rhs is a no-op.
+        TextEditorVi v("abc", "", {});
+        v.edit("\x1B");
+        v.edit("~");
+        expect(v.get_lhs() == "abc");
+        expect(v.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: operator + $ and 0 motions
+    ////////////////////////////////////////////////////////
+    {
+        // d$: delete from cursor to end of line.
+        TextEditorVi v("ab", "cd", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("$");
+        expect(v.get_lhs() == "ab");
+        expect(v.get_rhs() == "");
+    } {
+        // d0: delete from beginning of line to cursor.
+        TextEditorVi v("ab", "cd", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("0");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "cd");
+    } {
+        // c$: change to end of line — delete rhs and enter INSERT mode.
+        TextEditorVi v("ab", "cd", {});
+        v.edit("\x1B");
+        v.edit("c"); v.edit("$");
+        expect(v.get_lhs() == "ab");
+        expect(v.get_rhs() == "");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    } {
+        // c0: change to beginning of line — delete lhs and enter INSERT mode.
+        TextEditorVi v("ab", "cd", {});
+        v.edit("\x1B");
+        v.edit("c"); v.edit("0");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "cd");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    } {
+        // y$: yank to end of line without modifying the buffer.
+        // Verify by pasting (P inserts at current position).
+        TextEditorVi v("ab", "cd", {});
+        v.edit("\x1B");
+        v.edit("y"); v.edit("$");
+        expect(v.get_lhs() == "ab");   // buffer unchanged
+        expect(v.get_rhs() == "cd");
+        v.edit("P");                   // paste yanked "cd" before cursor
+        expect(v.get_lhs() == "abcd");
+        expect(v.get_rhs() == "cd");
+    } {
+        // y0: yank to beginning of line without modifying the buffer.
+        TextEditorVi v("abc", "def", {});
+        v.edit("\x1B");
+        v.edit("y"); v.edit("0");
+        expect(v.get_lhs() == "abc");  // buffer unchanged
+        expect(v.get_rhs() == "def");
+        v.edit("P");                   // paste yanked "abc" before cursor
+        expect(v.get_lhs() == "abcabc");
+        expect(v.get_rhs() == "def");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: operator + ^ motion
+    ////////////////////////////////////////////////////////
+    {
+        // d^ (cursor is after non-blank region): delete backward to first non-blank.
+        // lhs="  hello world", rhs="": first non-blank is at position 2,
+        // cursor is at 13, so delete the last 11 chars of lhs.
+        TextEditorVi v("  hello world", "", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("^");
+        expect(v.get_lhs() == "  ");
+        expect(v.get_rhs() == "");
+    } {
+        // d^ (cursor is before first non-blank): delete forward to first non-blank.
+        // lhs="", rhs="  hello": first non-blank is at position 2,
+        // cursor is at 0, so delete first 2 chars of rhs.
+        TextEditorVi v("", "  hello", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("^");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "hello");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: operator + word-backward motions (db, dB, cb, cW)
+    ////////////////////////////////////////////////////////
+    {
+        // db: delete one word backward.
+        TextEditorVi v("hello world", "", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("b");
+        expect(v.get_lhs() == "hello ");
+        expect(v.get_rhs() == "");
+    } {
+        // dB: delete one bigword backward (treats "hello.world" as one token).
+        TextEditorVi v("hello.world ", "", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("B");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "");
+    } {
+        // cb: change word backward — delete word and enter INSERT mode.
+        TextEditorVi v("hello world", "", {});
+        v.edit("\x1B");
+        v.edit("c"); v.edit("b");
+        expect(v.get_lhs() == "hello ");
+        expect(v.get_rhs() == "");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    } {
+        // cW: change bigword forward — delete bigword and enter INSERT mode.
+        TextEditorVi v("", "hello.world foo", {});
+        v.edit("\x1B");
+        v.edit("c"); v.edit("W");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "foo");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: operator + word-end motions (de, dE)
+    ////////////////////////////////////////////////////////
+    {
+        // de: delete up to and including the last char of the current word.
+        // "hello world": 'e' lands on position 4 ('o'), so de deletes "hello" (5 chars).
+        TextEditorVi v("", "hello world", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("e");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == " world");
+    } {
+        // dE: delete up to and including the last char of the current BIGWORD.
+        // "foo.bar baz": E (bigword) lands on 'r', so dE deletes "foo.bar" (7 chars).
+        TextEditorVi v("", "foo.bar baz", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("E");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == " baz");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: operator + W motion (dW, cw)
+    ////////////////////////////////////////////////////////
+    {
+        // dW: delete one bigword forward including trailing space.
+        TextEditorVi v("", "hello.world foo", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("W");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "foo");
+    } {
+        // cw: change word forward — delete word and enter INSERT mode.
+        TextEditorVi v("", "hello world", {});
+        v.edit("\x1B");
+        v.edit("c"); v.edit("w");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "world");
+        expect(v.get_mode() == TextEditor::Mode::INSERT);
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: yank + word motions (yw, yb)
+    ////////////////////////////////////////////////////////
+    {
+        // yw: yank word forward without modifying the buffer.
+        // Verify yank content by pasting with P.
+        TextEditorVi v("", "hello world", {});
+        v.edit("\x1B");
+        v.edit("y"); v.edit("w");
+        expect(v.get_lhs() == "");          // buffer must be unchanged
+        expect(v.get_rhs() == "hello world");
+        v.edit("P");                         // paste yanked "hello " before cursor
+        expect(v.get_lhs() == "hello ");
+        expect(v.get_rhs() == "hello world");
+    } {
+        // yb: yank word backward without modifying the buffer.
+        // Verify yank content by pasting with P.
+        TextEditorVi v("hello world", "", {});
+        v.edit("\x1B");
+        v.edit("y"); v.edit("b");
+        expect(v.get_lhs() == "hello world"); // buffer must be unchanged
+        expect(v.get_rhs() == "");
+        v.edit("P");                           // paste yanked "world" at current position
+        expect(v.get_lhs() == "hello worldworld");
+        expect(v.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: r on empty rhs (no-op)
+    ////////////////////////////////////////////////////////
+    {
+        // r followed by a character when rhs is empty: no replacement takes place.
+        TextEditorVi v("abc", "", {});
+        v.edit("\x1B");
+        v.edit("r"); v.edit("X");
+        expect(v.get_lhs() == "abc");
+        expect(v.get_rhs() == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: unknown motion after operator (silently cancelled)
+    ////////////////////////////////////////////////////////
+    {
+        // 'z' is not a valid motion; the pending 'd' is discarded and the buffer is untouched.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit("d"); v.edit("z");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "abc");
+    }
+
+    ////////////////////////////////////////////////////////
+    // NORMAL mode: p/P with empty yank buffer
+    ////////////////////////////////////////////////////////
+    {
+        // p with empty yank buffer: cursor advances one right (rhs non-empty) but nothing is inserted.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit("p");
+        expect(v.get_lhs() == "a");
+        expect(v.get_rhs() == "bc");
+    } {
+        // P with empty yank buffer: cursor does not move and nothing is inserted.
+        TextEditorVi v("", "abc", {});
+        v.edit("\x1B");
+        v.edit("P");
+        expect(v.get_lhs() == "");
+        expect(v.get_rhs() == "abc");
+    }
+
+}   // }}}
+
+static void test_tokenizers(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for tokenizers.cxx");
+
+    ////////////////////////////////////////////////////////
+    // TOKENIZE_PLAIN: default mode, no whitespace tokens
+    ////////////////////////////////////////////////////////
+    {
+        uint32_t count = 0;
+        for (const StringView sv : tokenize("ls -la /tmp", TOKENIZE_PLAIN))
+        {
+            switch (count++)
+            {
+                case 0: expect(sv == "ls");   break;
+                case 1: expect(sv == "-la");  break;
+                case 2: expect(sv == "/tmp"); break;
+                default: expect(false);
+            }
+        }
+        expect(count == 3);
+    }
+
+    ////////////////////////////////////////////////////////
+    // TOKENIZE_KEEP_WS: whitespace tokens are preserved
+    ////////////////////////////////////////////////////////
+    {
+        uint32_t count = 0;
+        for (const StringView sv : tokenize("ls -la", TOKENIZE_KEEP_WS))
+        {
+            switch (count++)
+            {
+                case 0: expect(sv == "ls");  break;
+                case 1: expect(sv == " ");   break;
+                case 2: expect(sv == "-la"); break;
+                default: expect(false);
+            }
+        }
+        expect(count == 3);
+    }
+
+    ////////////////////////////////////////////////////////
+    // TOKENIZE_DEQUOTE: strip surrounding single/double quotes
+    ////////////////////////////////////////////////////////
+    {
+        // Single-quoted token should be stripped.
+        uint32_t count = 0;
+        for (const StringView sv : tokenize("echo 'hello world'", TOKENIZE_DEQUOTE))
+        {
+            switch (count++)
+            {
+                case 0: expect(sv == "echo");        break;
+                case 1: expect(sv == "hello world"); break;
+                default: expect(false);
+            }
+        }
+        expect(count == 2);
+    } {
+        // Double-quoted token should be stripped.
+        uint32_t count = 0;
+        for (const StringView sv : tokenize("echo \"hello world\"", TOKENIZE_DEQUOTE))
+        {
+            switch (count++)
+            {
+                case 0: expect(sv == "echo");        break;
+                case 1: expect(sv == "hello world"); break;
+                default: expect(false);
+            }
+        }
+        expect(count == 2);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Empty input
+    ////////////////////////////////////////////////////////
+    {
+        uint32_t count = 0;
+        for ([[maybe_unused]] const StringView sv : tokenize("", TOKENIZE_PLAIN))
+            ++count;
+        expect(count == 0);
+    }
+
+    ////////////////////////////////////////////////////////
+    // tokenize_with_placeholder_replacement: tilde expansion
+    ////////////////////////////////////////////////////////
+    {
+        // Tilde should be expanded to the home directory.
+        StringMap extra;
+        uint32_t count = 0;
+        for (const String& s : tokenize_with_placeholder_replacement("ls ~/docs", extra, TOKENIZE_PLAIN))
+        {
+            if (count == 1)
+                expect(s.find("docs") != String::npos and not s.starts_with("~"));
+            ++count;
+        }
+        expect(count == 2);
+    }
+
+    ////////////////////////////////////////////////////////
+    // tokenize_with_placeholder_replacement: extra map replacement
+    ////////////////////////////////////////////////////////
+    {
+        // A token matching a key in the extra map should be replaced by the value.
+        StringMap extra;
+        extra["{key}"] = "value";
+
+        uint32_t count = 0;
+        for (const String& s : tokenize_with_placeholder_replacement("echo {key}", extra, TOKENIZE_PLAIN))
+        {
+            if (count == 1)
+                expect(s == "value");
+            ++count;
+        }
+        expect(count == 2);
+    }
+
+}   // }}}
+
+static void test_utf8(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for utf8.cxx");
+
+    ////////////////////////////////////////////////////////
+    // utf8_byte_size: infer byte count from leading byte
+    ////////////////////////////////////////////////////////
+
+    // ASCII (1-byte) characters have a leading byte in 0x00–0x7F range.
+    expect(utf8_byte_size(0x41) == 1);  // 'A'
+    expect(utf8_byte_size(0x7F) == 1);  // DEL
+
+    // 2-byte UTF-8 leading byte: 0xC0–0xDF.
+    expect(utf8_byte_size(0xC3) == 2);  // e.g. Latin Extended
+
+    // 3-byte UTF-8 leading byte: 0xE0–0xEF.
+    expect(utf8_byte_size(0xE3) == 3);  // e.g. CJK characters (あ = 0xE3 0x81 0x82)
+
+    // 4-byte UTF-8 leading byte: 0xF0–0xF7.
+    expect(utf8_byte_size(0xF0) == 4);  // e.g. supplementary characters
+
+    ////////////////////////////////////////////////////////
+    // utf8_width: display width per codepoint
+    ////////////////////////////////////////////////////////
+
+    expect(utf8_width(0x0041) == 1);  // 'A' (ASCII)
+    expect(utf8_width(0x3042) == 2);  // 'あ' (hiragana)
+    expect(utf8_width(0x4E2D) == 2);  // '中' (CJK unified ideograph)
+
+    ////////////////////////////////////////////////////////
+    // utf8_decode_iter: iterate codepoints of a UTF-8 string
+    ////////////////////////////////////////////////////////
+
+    String str = "Aあ𩸽";
+    Vector<uint32_t> codepoints;
+    for (const auto& [codepoint, ptr] : utf8_decode_iter(str.data(), str.size()))
+        codepoints.push_back(codepoint);
+    expect(codepoints.size() == 3);
+    expect(codepoints[0] == 0x0041);    // 'A'
+    expect(codepoints[1] == 0x3042);    // 'あ'
+    expect(codepoints[2] == 0x029e3d);  // '𩸽'
+
+    ////////////////////////////////////////////////////////
+    // utf8_encode: encode a Unicode codepoint to UTF-8
+    ////////////////////////////////////////////////////////
+
+    uint8_t buffer[5] = {0};
+
+    // 1-byte encoding (ASCII).
+    utf8_encode(0x0041, buffer);
+    expect(std::strcmp(reinterpret_cast<const char*>(buffer), "A") == 0);
+
+    // 3-byte encoding (hiragana).
+    utf8_encode(0x3042, buffer);
+    expect(std::strcmp(reinterpret_cast<const char*>(buffer), "あ") == 0);
+
+    // 4-byte encoding (supplementary character).
+    utf8_encode(0x029e3d, buffer);
+    expect(std::strcmp(reinterpret_cast<const char*>(buffer), "𩸽") == 0);
+
+    ////////////////////////////////////////////////////////
+    // utf8_decode: single character decode
+    ////////////////////////////////////////////////////////
+    {
+        const uint8_t* p = reinterpret_cast<const uint8_t*>("あ");
+        int32_t cp = 0;
+        ptrdiff_t nbytes = utf8_decode(p, 3, &cp);
+        expect(nbytes == 3);
+        expect(cp == 0x3042);
+    } {
+        // ASCII decode.
+        const uint8_t* p = reinterpret_cast<const uint8_t*>("A");
+        int32_t cp = 0;
+        ptrdiff_t nbytes = utf8_decode(p, 1, &cp);
+        expect(nbytes == 1);
+        expect(cp == 0x0041);
+    } {
+        // 2-byte decode: U+00E9 LATIN SMALL LETTER E WITH ACUTE (é = 0xC3 0xA9).
+        const uint8_t p[] = {0xC3, 0xA9, 0x00};
+        int32_t cp = 0;
+        ptrdiff_t nbytes = utf8_decode(p, 2, &cp);
+        expect(nbytes == 2);
+        expect(cp == 0x00E9);
+    } {
+        // 3-byte overlong encoding: 0xE0 0x80 0x80 decodes to U+0000 which is < 0x800,
+        // so utf8_decode must reject it as invalid.
+        const uint8_t overlong3[] = {0xE0, 0x80, 0x80};
+        int32_t cp = 0;
+        expect(utf8_decode(overlong3, 3, &cp) < 0);
+    }
+
+    ////////////////////////////////////////////////////////
+    // utf8_iter: iterate raw UTF-8 character string views
+    ////////////////////////////////////////////////////////
+    {
+        String s = "Aあ";
+        Vector<StringView> views;
+        for (const StringView sv : utf8_iter(s.data(), s.size()))
+            views.push_back(sv);
+        expect(views.size() == 2);
+        expect(views[0] == "A");
+        expect(views[1] == "あ");
+    }
+
+    ////////////////////////////////////////////////////////
+    // utf8_decode_next_charx: decode next character into CharX
+    ////////////////////////////////////////////////////////
+    {
+        const char* p = "あい";
+        CharX cx = utf8_decode_next_charx(p);
+        expect(cx.size() == 3);       // "あ" is 3 bytes.
+        expect(cx.view() == "あ");
+    } {
+        const char* p = "Abc";
+        CharX cx = utf8_decode_next_charx(p);
+        expect(cx.size() == 1);
+        expect(cx.view() == "A");
+    }
+
+    ////////////////////////////////////////////////////////
+    // utf8_byte_size: invalid leading bytes return 0
+    ////////////////////////////////////////////////////////
+
+    // Continuation bytes (0x80–0xBF) are not valid leading bytes.
+    expect(utf8_byte_size(0x80) == 0);
+    expect(utf8_byte_size(0xBF) == 0);
+
+    // 0xFF is also an invalid leading byte.
+    expect(utf8_byte_size(0xFF) == 0);
+
+    ////////////////////////////////////////////////////////
+    // utf8_decode: edge cases and error paths
+    ////////////////////////////////////////////////////////
+    {
+        int32_t cp = 0;
+
+        // Null pointer returns 0 without crashing.
+        expect(utf8_decode(nullptr, 3, &cp) == 0);
+
+        // Size 0 returns 0 immediately.
+        const uint8_t* p = reinterpret_cast<const uint8_t*>("A");
+        expect(utf8_decode(p, 0, &cp) == 0);
+
+        // Null-terminator as first byte returns 0.
+        const uint8_t nul = '\0';
+        expect(utf8_decode(&nul, 1, &cp) == 0);
+
+        // Invalid leading byte (continuation byte 0x81) returns error.
+        const uint8_t bad1[] = {0x81, 0x80};
+        expect(utf8_decode(bad1, 2, &cp) < 0);
+
+        // 2-byte sequence with invalid continuation (0x40 is not 0x80–0xBF).
+        const uint8_t bad2[] = {0xC3, 0x40};
+        expect(utf8_decode(bad2, 2, &cp) < 0);
+
+        // 3-byte sequence with invalid continuation byte in second position.
+        const uint8_t bad3[] = {0xE3, 0x40, 0x82};
+        expect(utf8_decode(bad3, 3, &cp) < 0);
+
+        // 3-byte surrogate half (U+D800 = 0xED 0xA0 0x80) is invalid.
+        const uint8_t surr[] = {0xED, 0xA0, 0x80};
+        expect(utf8_decode(surr, 3, &cp) < 0);
+
+        // 4-byte: 0xF0 requires the second byte >= 0x90.
+        const uint8_t f0low[] = {0xF0, 0x80, 0x80, 0x80};
+        expect(utf8_decode(f0low, 4, &cp) < 0);
+
+        // 4-byte: 0xF4 requires the second byte <= 0x8F.
+        const uint8_t f4hi[] = {0xF4, 0x90, 0x80, 0x80};
+        expect(utf8_decode(f4hi, 4, &cp) < 0);
+
+        // 4-byte: invalid continuation byte in the third position.
+        const uint8_t bad4[] = {0xF0, 0x90, 0x40, 0x80};
+        expect(utf8_decode(bad4, 4, &cp) < 0);
+    }
+
+    ////////////////////////////////////////////////////////
+    // utf8_encode: edge cases
+    ////////////////////////////////////////////////////////
+    {
+        uint8_t buf[5] = {0};
+
+        // Negative codepoint is invalid — returns 0.
+        expect(utf8_encode(-1, buf) == 0);
+
+        // 2-byte encoding (U+0080).
+        expect(utf8_encode(0x0080, buf) == 2);
+        expect((buf[0] & 0xE0) == 0xC0);  // Leading byte: 110xxxxx.
+        expect((buf[1] & 0xC0) == 0x80);  // Continuation byte: 10xxxxxx.
+
+        // Codepoint >= 0x110000 is out of Unicode range — returns 0.
+        expect(utf8_encode(0x110000, buf) == 0);
+    }
+
+    ////////////////////////////////////////////////////////
+    // utf8_decode_next_charx: null pointer returns empty CharX
+    ////////////////////////////////////////////////////////
+    {
+        const CharX cx = utf8_decode_next_charx(nullptr);
+        expect(cx.size() == 0);
+    }
+
+    ////////////////////////////////////////////////////////
+    // utf8_width: out-of-range codepoints use the fallback property
+    ////////////////////////////////////////////////////////
+
+    // These must not crash; the return value for invalid codepoints is implementation-defined
+    // but should be non-negative.
+    expect(utf8_width(-1) >= 0);
+    expect(utf8_width(0x110000) >= 0);
+
+}   // }}}
+
+static void test_utils(void)
+{   // {{{
+
+    // Print header.
+    print_header("Unit test for utils.cxx");
+
+    ////////////////////////////////////////////////////////
+    // min / max / clip templates
+    ////////////////////////////////////////////////////////
+
+    expect(min(3, 5)  == 3);
+    expect(min(-1, 1) == -1);
+    expect(max(3, 5)  == 5);
+    expect(max(-1, 1) == 1);
+    expect(clip(5, 0, 10)  == 5);   // Within range.
+    expect(clip(-1, 0, 10) == 0);   // Below lower bound.
+    expect(clip(15, 0, 10) == 10);  // Above upper bound.
+
+    ////////////////////////////////////////////////////////
+    // deduplicate: in-place unique + sort
+    ////////////////////////////////////////////////////////
+    {
+        Vector<int> v = {3, 1, 2, 1, 3};
+        deduplicate(v);
+        expect(v.size() == 3);
+        expect(v[0] == 1);
+        expect(v[1] == 2);
+        expect(v[2] == 3);
+    } {
+        // Empty vector stays empty.
+        Vector<int> v;
+        deduplicate(v);
+        expect(v.empty());
+    }
+
+    ////////////////////////////////////////////////////////
+    // split: generator-based string splitting
+    ////////////////////////////////////////////////////////
+    {
+        uint32_t count = 0;
+        for (const StringView sv : split("this,is,csv", ","))
+        {
+            switch (count++)
+            {
+                case 0 : expect(sv == "this"); break;
+                case 1 : expect(sv == "is");   break;
+                case 2 : expect(sv == "csv");  break;
+                default: expect(false);
+            }
+        }
+    } {
+        // Single token (no delimiter found): yields the whole string.
+        uint32_t n = 0;
+        for (const StringView sv : split("nodel", ","))
+        {
+            expect(sv == "nodel");
+            ++n;
+        }
+        expect(n == 1);
+    } {
+        // Empty delimiter yields the whole string.
+        uint32_t n = 0;
+        for (const StringView sv : split("abc", ""))
+        {
+            expect(sv == "abc");
+            ++n;
+        }
+        expect(n == 1);
+    }
+
+    ////////////////////////////////////////////////////////
+    // replace: substring replacement
+    ////////////////////////////////////////////////////////
+
+    expect(replace("hello world", "world", "Japan") == "hello Japan");
+    expect(replace("aaa", "a", "bb") == "bbbbbb");
+
+    // No match: original string returned.
+    expect(replace("hello", "xyz", "abc") == "hello");
+
+    // Replace with empty string (effectively deletes the old string).
+    expect(replace("hello world", "world", "") == "hello ");
+
+    ////////////////////////////////////////////////////////
+    // strip: whitespace trimming
+    ////////////////////////////////////////////////////////
+
+    expect(strip("  hello  ") == "hello");
+    expect(strip("  hello  ", true, false) == "hello  ");   // left only.
+    expect(strip("  hello  ", false, true) == "  hello");   // right only.
+    expect(strip("hello") == "hello");                      // No whitespace.
+    expect(strip("   ") == "");                             // All whitespace.
+
+    ////////////////////////////////////////////////////////
+    // expand_tilde: tilde expansion
+    ////////////////////////////////////////////////////////
+
+    expect(expand_tilde("~/.config").ends_with("/.config"));
+    expect(expand_tilde(".config").ends_with(".config"));
+
+    // Path without tilde prefix is returned unchanged.
+    expect(expand_tilde("/usr/local") == "/usr/local");
+
+    ////////////////////////////////////////////////////////
+    // hash: FNV-1a hash function
+    ////////////////////////////////////////////////////////
+
+    // The same string should always produce the same hash.
+    expect(hash("hello") == hash("hello"));
+
+    // Different strings should (almost always) produce different hashes.
+    expect(hash("hello") != hash("world"));
+
+    // Null string should return the initial hash value.
+    const char* null_str = nullptr;
+    expect(hash(null_str) == 0xcbf29ce484222325ULL);
+
+    ////////////////////////////////////////////////////////
+    // get_time: formatted time string
+    ////////////////////////////////////////////////////////
+
+    time_t raw_time = std::time(nullptr);
+    expect(get_time(raw_time, "%Y/%m/%d").size() > 0);
+
+    ////////////////////////////////////////////////////////
+    // readline: generator-based file reading
+    ////////////////////////////////////////////////////////
+    {
+        // Non-existent file yields no lines.
+        uint32_t n = 0;
+        for ([[maybe_unused]] const String& line : readline("/non_existent_file_xyz"))
+            ++n;
+        expect(n == 0);
+    } {
+        // Existing file (this test file itself) should have multiple lines.
+        uint32_t n = 0;
+        for ([[maybe_unused]] const String& line : readline("test_main.cxx"))
+            ++n;
+        expect(n > 10);
+    }
+
+    ////////////////////////////////////////////////////////
+    // tokenize with TOKENIZE_DEQUOTE option
+    ////////////////////////////////////////////////////////
+    {
+        int32_t count = 0;
+        for (const StringView sv : tokenize("timeout 0.1s 'ls --help'", TOKENIZE_DEQUOTE))
+        {
+            switch (count++)
+            {
+                case 0 : expect(sv == "timeout");    break;
+                case 1 : expect(sv == "0.1s");       break;
+                case 2 : expect(sv == "ls --help");  break;
+                default: expect(false);
+            }
+        }
+    }
+
+    ////////////////////////////////////////////////////////
+    // transform: element-wise conversion into a new vector
+    ////////////////////////////////////////////////////////
+    {
+        const Vector<int32_t> xs = {1, 2, 3};
+        const Vector<int32_t> ys = transform<int32_t, int32_t>(xs, [](const int32_t& x) { return x * 2; });
+        expect(ys.size() == 3);
+        expect(ys[0] == 2);
+        expect(ys[1] == 4);
+        expect(ys[2] == 6);
+
+        // An empty input produces an empty output.
+        const Vector<int32_t> empty;
+        const Vector<int32_t> result = transform<int32_t, int32_t>(empty, [](const int32_t& x) { return x; });
+        expect(result.empty());
+    }
+
+    ////////////////////////////////////////////////////////
+    // launch_async: asynchronous invocation wrapper
+    ////////////////////////////////////////////////////////
+    {
+        auto future = launch_async([](int32_t x) { return x + 1; }, 41);
+        expect(future.get() == 42);
+    }
+
+    ////////////////////////////////////////////////////////
+    // get_terminal_size: falls back to 80x24 when the ioctl fails
+    ////////////////////////////////////////////////////////
+    {
+        const Size size = get_terminal_size();
+        expect(size.cols > 0);
+        expect(size.rows > 0);
+    }
+
+    ////////////////////////////////////////////////////////
+    // replace: degenerate arguments
+    ////////////////////////////////////////////////////////
+    {
+        // An empty search string returns a copy of the input.
+        expect(replace("abc", "", "x") == "abc");
+
+        // Replacing a string with itself returns a copy of the input.
+        expect(replace("abc", "b", "b") == "abc");
+    }
+
+    ////////////////////////////////////////////////////////
+    // strip: both flags disabled leaves the string untouched
+    ////////////////////////////////////////////////////////
+    {
+        expect(strip("  a  ", false, false) == "  a  ");
+        expect(strip("") == "");
+    }
+
+    ////////////////////////////////////////////////////////
+    // expand_tilde: a bare tilde expands to the home directory
+    ////////////////////////////////////////////////////////
+    {
+        const char* home = std::getenv("HOME");
+        if (home != nullptr)
+            expect(expand_tilde("~") == String(home));
+    }
+
+}   // }}}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Integration test functions
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static void test_readcmd(void)
+{   // {{{
+
+    // Skip this test when stdin is not a terminal, because readcmd requires a TTY.
+    if (not isatty(STDIN_FILENO) or not isatty(STDOUT_FILENO))
+    {
+        print_header("Integration test for readcmd function (SKIPPED: no TTY)");
+        return;
+    }
+
+    // Load the test config used in all readcmd tests.
+    const RedAlienConfig cfg = load_config("misc/config.toml");
+
+    const auto run_test_readcmd = [&cfg](const char* input, const char* output_lhs, const char* output_rhs, const char* editor = "emacs") -> bool
+    // Run readcmd for testing purpose.
+    //
+    // [Args]
+    //   input      (const char*): Input command string.
+    //   output_lhs (const char*): Expected lhs string after the command.
+    //   output_rhs (const char*): Expected rhs string after the command.
+    //
+    // [Returns]
+    //   (bool): True if the output matches the expected values.
+    {
+        const char* lhs_ini = "";
+        const char* rhs_ini = "";
+        const Deque<String> hists = {"previous input1", "previous input2"};
+
+        try
+        {
+            ReadCmdOut rc_out = readcmd(lhs_ini, rhs_ini, hists, editor, Path("/tmp"), input, cfg);
+
+            if (rc_out.stop.size() > 0)
+                rc_out.lhs = rc_out.stop;
+
+            return (String(output_lhs) == rc_out.lhs) and (String(output_rhs) == rc_out.rhs);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "readcmd exception: " << e.what() << std::endl;
+            return false;
+        }
+    };
+
+    // Print header.
+    print_header("Unit test for readcmd function");
+
+    // Command completions.
+    expect(run_test_readcmd("ls -l\n", "ls -l", "", "emacs"));
+    expect(run_test_readcmd("ls -l\n", "ls -l", "", "vi"));
+    expect(run_test_readcmd("ls ~/\n", "ls ~/", "", "???"));
+    expect(run_test_readcmd("ls Makefile \n", "ls Makefile ", ""));
+    expect(run_test_readcmd("git bra\t\n", "git branch ", ""));
+    expect(run_test_readcmd("ls ./mi\t \n", "ls ./misc/ ", ""));
+    expect(run_test_readcmd("ls ./source/conf\t \n", "ls ./source/config. ", ""));
+
+    // Simple typing followed by Enter.
+    expect(run_test_readcmd("p\n", "p", ""));
+
+    // History completions.
+    expect(run_test_readcmd("previ\x05\n", "previous input2 ", ""));
+    expect(run_test_readcmd("previous input1\x05\n", "previous input1 ", ""));
+
+    // Test the stop key.
+    expect(run_test_readcmd("\x06\n", "^F", ""));
+
+    // Ctrl-C and Ctrl-D.
+    expect(run_test_readcmd("\x03", "^C", ""));
+    expect(run_test_readcmd("\x04\n", "^D", ""));
+
+    // Test carapace.
+    expect(run_test_readcmd("apk install git\n", "apk install git", ""));
+
+    ////////////////////////////////////////////////////////
+    // readcmd with non-empty rhs_ini: exercises update() rhs branch
+    ////////////////////////////////////////////////////////
+    {
+        // When the initial rhs is non-empty, TermUserIF::update() takes the
+        // "if (not rhs.empty())" branch (lines 230-232 in terminal.cxx).
+        const Deque<String> hists;
+        try
+        {
+            ReadCmdOut rc_out = readcmd("hello ", "world", hists, "emacs", Path("/tmp"), "\n", cfg);
+            expect(rc_out.lhs == "hello ");
+            expect(rc_out.rhs == "world");
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "readcmd (non-empty rhs) exception: " << e.what() << std::endl;
+        }
+    }
+
+    ////////////////////////////////////////////////////////
+    // TermUserIF::update_lines with wrong number of lines
+    ////////////////////////////////////////////////////////
+    {
+        // update_lines returns false when the number of lines differs from the
+        // number of rows the terminal was created with.
+        const Size term_size = get_terminal_size();
+        TermUserIF termui(cfg.area_height, term_size.cols);
+
+        // A vector with a different number of lines than area_height triggers the early return.
+        const Vector<String> wrong_lines = {"only one line"};
+        expect(termui.update_lines(wrong_lines) == false);
+
+        // A vector with exactly area_height lines should succeed.
+        const Vector<String> correct_lines(cfg.area_height, "\x1B[0K");
+        expect(termui.update_lines(correct_lines) == true);
+    }
+
+}   // }}}
+
+static void test_main_redalien(void)
+{   // {{{
+
+    // Skip this test when stdin/stdout is not a terminal, because main_redalien requires a TTY.
+    if (not isatty(STDIN_FILENO) or not isatty(STDOUT_FILENO))
+    {
+        print_header("Integration test for main_redalien (SKIPPED: no TTY)");
+        return;
+    }
+
+    std::remove("/tmp/redalien.out");
+
+    const char* argv0[] = {"redalien", "--outdir", "/tmp"};
+    main_redalien(3, const_cast<char**>(argv0), "\x14""exit\n");
+    std::ofstream("/tmp/redalien.out");
+    main_redalien(3, const_cast<char**>(argv0), "\x14""exit\n");
+
+    std::remove("/tmp/redalien.out");
+
+    const char* argv1[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
+    main_redalien(5, const_cast<char**>(argv1), "exit\n");
+
+    const char* argv6[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
+    main_redalien(5, const_cast<char**>(argv6), "\x05\n");
+
+    // Test the run_keybind path: ^F is a stop key bound to an external command.
+    // The keybind command (filechooser) likely does not exist in the test environment,
+    // so run_keybind will fail to open the plugin output file and fall back gracefully.
+    // The subsequent Enter key causes main_redalien to exit normally.
+    const char* argv7[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
+    main_redalien(5, const_cast<char**>(argv7), "\x06\n");
+
+    // Same test but with a mock plugin output file present, so run_keybind can read it.
+    {
+        std::ofstream ofs("/tmp/plugin.out");
+        ofs << "left_part\nright_part\n";
+    }
+    const char* argv8[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
+    main_redalien(5, const_cast<char**>(argv8), "\x06\n");
+    std::remove("/dev/shm/redalien/plugin.out");
+
+    // Test the --help option.
+    const char* argv9[] = {"redalien", "--help"};
+    main_redalien(2, const_cast<char**>(argv9), "");
+
+    // Test invalid outdir.
+    const char* argv10[] = {"redalien", "--outdir", "/non_existent_dir"};
+    main_redalien(3, const_cast<char**>(argv10), "");
+
+}   // }}}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Main function
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+int main(void)
+{   // {{{
+
+    // Run all unit test functions.
+    test_AsyncComp();
+    test_BashCompleter();
+    test_CarapaceService();
+    test_CharX();
+    test_CmdRunner();
+    test_EditHelper();
+    test_error();
+    test_GapBuffer();
+    test_GenPathCache();
+    test_HistManager();
+    test_MimeType();
+    test_PathX();
+    test_preview();
+    test_RedAlienConfig();
+    test_string_utils();
+    test_TermUserIF_pty();
+    test_TextEditor();
+    test_TextEditorEmacs();
+    test_TextEditorVi();
+    test_tokenizers();
+    test_utf8();
+    test_utils();
+
+    // Run all integration test functions.
+    test_readcmd();
+    test_main_redalien();
+
+    // Print header of overall result.
+    std::cout                                         << std::endl;
+    std::cout << "=============================="     << std::endl;
+    std::cout << "\033[33mOVERALL TEST RESULT\033[0m" << std::endl;
+
+    // Print test result.
+    if (passed) { std::cout << "\033[32mPASSED\033[0m" << std::endl; }
+    else        { std::cout << "\033[31mFAILED\033[0m" << std::endl; }
+
+    std::cout << "test finished" << std::endl;
+
+    return passed ? EXIT_SUCCESS : EXIT_FAILURE;
+
+}   // }}}
+
+// vim: expandtab tabstop=4 shiftwidth=4 fdm=marker
