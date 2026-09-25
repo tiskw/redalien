@@ -81,7 +81,7 @@ keep using RedAlien, add the line to your `.bashrc` for a permanent setup.
 
 ```bash
 # Load the RedAlien integration script.
-source ~/.local/share/redalien/redalien-integration.bash
+source ~/.local/share/redalien/bin/redalien-integration.bash
 ```
 
 You can also install RedAlien in a directory other than `~/.local/share`. If you do,
