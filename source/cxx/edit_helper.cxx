@@ -490,17 +490,17 @@ const Vector<String>& EditHelper::candidate(StringView lhs)
     this->cands->clear();
     switch (comp_type)
     {
-        case CompType::BASHCOMP : this->cands_bashcomp (lhs, tokens);         break;
-        case CompType::CARAPACE : this->cands_carapace (tokens);              break;
-        case CompType::COMMAND  : this->cands_command  (tokens, option);      break;
-        case CompType::GREP     : this->cands_grep     (tokens, option);      break;
-        case CompType::OPTION   : this->cands_option   (tokens);              break;
-        case CompType::PATH     : this->cands_filepath (tokens);              break;
-        case CompType::PREVIEW  : this->cands_filepath (tokens);              break;
-        case CompType::SHELL    : this->cands_shell    (tokens, option);      break;
-        case CompType::SUBCMD   : this->cands_subcmd   (tokens, option);      break;
-        case CompType::SC_AND_BC: this->cands_sc_and_bc(lhs, tokens, option); break;
-        case CompType::NONE     : this->cands_filepath (tokens);              break;
+        case CompType::BASHCOMP : this->cands_bashcomp (tokens);         break;
+        case CompType::CARAPACE : this->cands_carapace (tokens);         break;
+        case CompType::COMMAND  : this->cands_command  (tokens, option); break;
+        case CompType::GREP     : this->cands_grep     (tokens, option); break;
+        case CompType::OPTION   : this->cands_option   (tokens);         break;
+        case CompType::PATH     : this->cands_filepath (tokens);         break;
+        case CompType::PREVIEW  : this->cands_filepath (tokens);         break;
+        case CompType::SHELL    : this->cands_shell    (tokens, option); break;
+        case CompType::SUBCMD   : this->cands_subcmd   (tokens, option); break;
+        case CompType::SC_AND_BC: this->cands_sc_and_bc(tokens, option); break;
+        case CompType::NONE     : this->cands_filepath (tokens);         break;
     }
 
     // Convert completion candidates to lines for display.
@@ -603,7 +603,7 @@ String EditHelper::complete(StringView lhs) const
 // EditHelper: Private functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void EditHelper::cands_bashcomp(StringView lhs, const Vector<StringView>& tokens)
+void EditHelper::cands_bashcomp(const Vector<StringView>& tokens)
 {   // {{{
 
     // Construct bash-completion instance if it is not constructed yet.
@@ -611,7 +611,7 @@ void EditHelper::cands_bashcomp(StringView lhs, const Vector<StringView>& tokens
         this->bash_completer.emplace();
 
     // Compute completion candidates from bash-completion.
-    for (const String& c : this->bash_completer->complete(lhs))
+    for (const String& c : this->bash_completer->complete(tokens))
         this->cands->emplace_back(c, c);
 
     // If no candidates found from bash-completion, then compute candidates from file path.
@@ -963,7 +963,7 @@ void EditHelper::cands_subcmd(const Vector<StringView>& tokens, const String& op
 
 }   // }}}
 
-void EditHelper::cands_sc_and_bc(StringView lhs, const Vector<StringView>& tokens, const String& option)
+void EditHelper::cands_sc_and_bc(const Vector<StringView>& tokens, const String& option)
 {   // {{{
 
     // Case 1: tokens == ["command name"].
@@ -976,7 +976,7 @@ void EditHelper::cands_sc_and_bc(StringView lhs, const Vector<StringView>& token
 
     // Case 3: tokens == ["command name", "subcommand", "something"].
     else
-        this->cands_bashcomp(lhs, tokens);
+        this->cands_bashcomp(tokens);
 
 }   // }}}
 

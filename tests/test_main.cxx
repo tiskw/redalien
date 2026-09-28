@@ -191,7 +191,7 @@ static void test_BashCompleter(void)
 
         // "git sta" should produce completions containing "status" and/or "stash".
         // Note: bash-completion may append a trailing space to each candidate.
-        const Vector<String> results = bc.complete("git sta");
+        const Vector<String> results = bc.complete({"git", "sta"});
         bool found_status = false;
         bool found_stash  = false;
         for (const String& s : results)
@@ -210,8 +210,8 @@ static void test_BashCompleter(void)
         BashCompleter bc;
 
         // "git " (with trailing space) should return the full list of git subcommands.
-        const Vector<String> results = bc.complete("git ");
-        expect(!results.empty());
+        const Vector<String> results = bc.complete({"git", ""});
+        expect(not results.empty());
     }
 
     ////////////////////////////////////////////////////////
@@ -221,7 +221,7 @@ static void test_BashCompleter(void)
         BashCompleter bc;
 
         // An empty string is a degenerate input; complete() must not throw or crash.
-        [[maybe_unused]] const Vector<String> results = bc.complete("");
+        [[maybe_unused]] const Vector<String> results = bc.complete({""});
     }
 
     ////////////////////////////////////////////////////////
@@ -231,9 +231,9 @@ static void test_BashCompleter(void)
         BashCompleter bc;
 
         // The same BashCompleter instance must handle multiple calls correctly.
-        [[maybe_unused]] const Vector<String> r1 = bc.complete("ls --");
-        [[maybe_unused]] const Vector<String> r2 = bc.complete("git ");
-        [[maybe_unused]] const Vector<String> r3 = bc.complete("echo ");
+        [[maybe_unused]] const Vector<String> r1 = bc.complete({"ls", "--"});
+        [[maybe_unused]] const Vector<String> r2 = bc.complete({"git", ""});
+        [[maybe_unused]] const Vector<String> r3 = bc.complete({"echo", ""});
 
         // Each call must return a Vector (possibly empty) without crashing.
         expect(true);
@@ -247,7 +247,18 @@ static void test_BashCompleter(void)
 
         // Input that contains a single-quote must be shell-quoted correctly and
         // must not cause the child bash process to hang or crash.
-        [[maybe_unused]] const Vector<String> results = bc.complete("echo 'hello");
+        [[maybe_unused]] const Vector<String> results = bc.complete({"echo", "'hello"});
+    }
+
+    ////////////////////////////////////////////////////////
+    // complete: Make sure the complete process do not execute arbitrary commands (security test)
+    ////////////////////////////////////////////////////////
+    {
+        BashCompleter bc;
+        std::remove("/tmp/ra_pwned_s1");
+        bc.complete({"git", "commit", "-m", "\"$(touch /tmp/ra_pwned_s1)\""});
+        bc.complete({"echo", "`touch /tmp/ra_pwned_s1`"});
+        expect(not stdfs::exists("/tmp/ra_pwned_s1"));
     }
 
 }   // }}}

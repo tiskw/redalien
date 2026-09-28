@@ -135,11 +135,10 @@ class EditHelper
         // Private functions
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        void cands_bashcomp(StringView lhs, const Vector<StringView>& tokens);
+        void cands_bashcomp(const Vector<StringView>& tokens);
         // Compute completion candidates from bash-completion.
         //
         // [Args]
-        //   lhs    (StringView)              : [IN] Left-hand-side of the user input.
         //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
 
         void cands_command(const Vector<StringView>& tokens, const String& option);
@@ -197,11 +196,10 @@ class EditHelper
         //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
         //   option (const String&)           : [IN] Optional string.
 
-        void cands_sc_and_bc(StringView lhs, const Vector<StringView>& tokens, const String& option);
+        void cands_sc_and_bc(const Vector<StringView>& tokens, const String& option);
         // Combination of sub command and bash-completion candidates.
         //
         // [Args]
-        //   lhs    (StringView)              : [IN] Left-hand-side of the user input.
         //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
         //   option (const String&)           : [IN] Optional string.
 

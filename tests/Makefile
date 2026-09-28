@@ -28,7 +28,7 @@ LIBS    := -L/usr/local/lib -lncurses
 COVOPTS := -fPIC -coverage -fprofile-update=atomic -DGCOV_BUILD
 
 # Commands for Docker-based static build.
-DOCKER_IMAGE := tiskw/redalien:alpine3.23
+DOCKER_IMAGE := tiskw/redalien:alpine3.23_amd64
 DOCKER_BASE  := run --rm -it -u `id -u`:`id -g` -v `pwd`:/work -w /work
 DOCKER_CMND  := $(DOCKER_BASE) $(DOCKER_IMAGE)
 

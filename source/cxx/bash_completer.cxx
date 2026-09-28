@@ -24,7 +24,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Bash initialisation script sent to the child process on startup.
 //   - Sources the system-wide bash-completion library.
-//   - Defines the __bc_complete helper function used by complete().
+//   - Defines the __bc_complete__ helper function used by complete().
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static const char INIT_SCRIPT[] = R"BASH_SCRIPT(
@@ -32,58 +32,36 @@ set +e
 source /usr/share/bash-completion/bash_completion 2>/dev/null || true
 
 # Completion helper function.
-# Argument: the partial command-line string typed by the user (e.g. "git sta").
-# Output:   one completion candidate per line written to stdout.
-__bc_complete() {
-    local input="$1"
+# Argument: The partial command-line string typed by the user (e.g. "git sta").
+# Output:   One completion candidate per line written to stdout.
+function __bc_complete__ ()
+{
+    # Safeguard for empty input.
+    (( $# >= 1 )) || return 0
 
-    # Split the input into words, respecting shell quoting.
-    # Fall back to simple whitespace splitting if eval fails.
-    local -a words
-    if ! eval "words=($input)" 2>/dev/null; then
-        read -ra words <<< "$input"
-    fi
+    # Set the editing buffer and cursor position.
+    COMP_LINE=$*
+    COMP_POINT=${#COMP_LINE}
 
-    local nwords=${#words[@]}
-    local cword
-
-    # If the input ends with whitespace, the user is completing the next
-    # (currently empty) word rather than extending the last one.
-    if [[ "$input" =~ [[:space:]]$ ]]; then
-        cword=$nwords
-        words+=("")
-    else
-        cword=$(( nwords > 0 ? nwords - 1 : 0 ))
-    fi
-
-    # Populate the environment variables expected by bash-completion.
-    COMP_LINE="$input"
-    COMP_POINT="${#input}"
-    COMP_WORDS=("${words[@]}")
-    COMP_CWORD=$cword
-
-    local cmd="${words[0]:-}"
-    local cur="${words[$cword]:-}"
-    local prev=""
-    (( cword > 0 )) && prev="${words[$((cword - 1))]}"
+    # Set the completion words and current word index.
+    COMP_WORDS=("${@}")
+    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
 
     # Dynamically load the completion definition for the given command.
     if declare -f _completion_loader &>/dev/null; then
-        _completion_loader "$cmd" 2>/dev/null || true
+        _completion_loader "${COMP_WORDS[0]}" 2>/dev/null || true
     fi
 
+    # Retrieve the completion spec and completion function.
+    local comp_spec=$(complete -p "${COMP_WORDS[0]}")
+    local comp_func=$(sed -n 's/.*-F \([^ ]*\).*/\1/p' <<< "${comp_spec}")
+
+    # Reset the previous completion results.
     COMPREPLY=()
 
-    # Retrieve the completion spec and invoke the associated function.
-    local compspec
-    compspec=$(complete -p -- "$cmd" 2>/dev/null || true)
-
-    if [[ "$compspec" =~ -F[[:space:]]+([^[:space:]]+) ]]; then
-        local compfunc="${BASH_REMATCH[1]}"
-        "$compfunc" "$cmd" "$cur" "$prev" 2>/dev/null || true
-    elif [[ -n "$cur" ]]; then
-        # Fall back to plain filename completion when no spec is found.
-        mapfile -t COMPREPLY < <(compgen -f -- "$cur" 2>/dev/null)
+    # Run the completion function if it found.
+    if [[ -n "$comp_func" ]]; then
+        "$comp_func" 2>/dev/null || true
     fi
 
     printf '%s\n' "${COMPREPLY[@]}"
@@ -234,11 +212,16 @@ String BashCompleter::read_until_sentinel(int timeout_ms)
 
 }   // }}}
 
-Vector<String> BashCompleter::complete(StringView user_input)
+Vector<String> BashCompleter::complete(const Vector<StringView>& tokens)
 {   // {{{
 
+    // Create a command string that is sent to the __bc_complete__ function.
+    String cmd = "__bc_complete__ ";
+    for (const StringView token : tokens)
+        cmd += ' ' + shell_quote(token);
+
     // Send the user input to the bash child process and request completions.
-    send_line("__bc_complete " + shell_quote(user_input));
+    send_line(cmd);
     send_line(String("echo ") + String(SENTINEL));
 
     // Read the output from the bash child process until the sentinel is encountered.

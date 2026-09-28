@@ -66,11 +66,11 @@ class BashCompleter
         // Member functions
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        Vector<String> complete(StringView user_input);
+        Vector<String> complete(const Vector<StringView>& tokens);
         // Returns a list of completion candidates for the given command-line string.
         //
         // [Args]
-        //   user_input (StringView): [IN] The partial command line typed by the user.
+        //   tokens (const Vector<StringView>&): [IN] The tokenized version of the user input.
         //
         // [Returns]
         //   (Vector<String>): A vector of matching completion strings.
