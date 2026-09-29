@@ -23,6 +23,7 @@
 #include "dtypes.hxx"
 #include "error.hxx"
 #include "gen_path_cache.hxx"
+#include "path_x.hxx"
 #include "read_cmd.hxx"
 #include "string_utils.hxx"
 #include "tokenizers.hxx"
@@ -83,6 +84,23 @@ namespace
             return "\x1B[38;2;181;189;104m" + branch +  "\x1B[m";
 
         return branch;
+
+    }   // }}}
+
+    bool is_valid_outdir(const Path& path)
+    // Check if the given path is a valid output directory.
+    //
+    // [Args]
+    //   path (const Path&): [IN] Path to be checked.
+    //
+    // [Returns]
+    //   (bool): True if the path is a valid output directory, otherwise false.
+    //
+    {   // {{{
+
+        struct stat st{};
+        return (lstat(path.c_str(), &st) == 0) and S_ISDIR(st.st_mode)
+            and (st.st_uid == ::getuid()) and ((st.st_mode & 077) == 0);
 
     }   // }}}
 
@@ -326,7 +344,7 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     // at the end. This is because this program is designed to be called repeatedly, and the pause
     // prevents the CPU from becoming overburdened by rapid, repetitive execution.
     const Path outdir = args.count("outdir") ? Path(args["outdir"].as<String>()) : Path("");
-    if (not stdfs::is_directory(outdir))
+    if (not is_valid_outdir(outdir))
     {
         print_error("Error", "The mandatory option --outdir is not provided or invalid.");
 

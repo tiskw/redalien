@@ -258,6 +258,40 @@ function __redalien_enable_dsr__ ()
 # Setup and cleanup functions for RedAlien integration
 #---------------------------------------------------------------------------------------------------
 
+function __redalien_make_outdir__ ()
+{   # {{{
+
+    # Select a directory to store RedAlien's output files (e.g., redalien.out) that is owned by
+    # the current user and is not a symlink, and set its permission to 700. The candidates are:
+    #   - ${XDG_RUNTIME_DIR}/redalien
+    #   - /dev/shm/redalien-${UID}
+    #   - /tmp/redalien-${UID}
+
+    # Define the candidate directories.
+    local candidates=(
+        "${XDG_RUNTIME_DIR:-/dev/null}/redalien"
+        "/dev/shm/redalien-$(id -u)"
+        "/tmp/redalien-$(id -u)"
+    )
+
+    # Check each candidate directory and return the first one that is valid.
+    for dir in "${candidates[@]}"; do
+
+        mkdir -p -m 700 "${dir}" 2>/dev/null
+
+        if [ -d "${dir}" ] && [ ! -L "${dir}" ] && [ "$(stat -c %u "${dir}")" -eq "$(id -u)" ]; then
+            chmod 700 "${dir}" 2>/dev/null || continue
+            echo "${dir}"
+            return 0
+        fi
+    done
+
+    # If none of the candidates are valid, print an error message and exit with status 1.
+    echo "RedAlien: ERROR: Failed to create output directory in /tmp or /dev/shm." >&2
+    exit 1
+
+}   # }}}
+
 function __redalien_setup__ ()
 # Setup RedAlien in the current shell.
 #
@@ -267,14 +301,7 @@ function __redalien_setup__ ()
 {   # {{{
 
     # Create a output directory for RedAlien to store its output files.
-    local tmpdir_rom="/tmp/redalien-$(id -u)"
-    local tmpdir_ram="/dev/shm/redalien-$(id -u)"
-    if   [ -d /dev/shm ] && mkdir -p ${tmpdir_ram}; then __REDALIEN_OUTDIR__="${tmpdir_ram}";
-    elif [ -d /tmp     ] && mkdir -p ${tmpdir_rom}; then __REDALIEN_OUTDIR__="${tmpdir_rom}";
-    else
-        printf 'RedAlien: ERROR: Failed to create output directory in /tmp or /dev/shm.\n' >&2
-        return 1
-    fi
+    __REDALIEN_OUTDIR__=$(__redalien_make_outdir__)
 
     # Do nothing if redalien_readcmd is not found.
     command -v "${__REDALIEN_BINARY__}" >/dev/null 2>&1 || return 0

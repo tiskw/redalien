@@ -7,7 +7,7 @@
 #ifndef DTYPES_HXX
 #define DTYPES_HXX
 
-// Include the headers of STL.
+// Include STL headers.
 #include <cstdint>
 #include <deque>
 #include <filesystem>
