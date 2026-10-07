@@ -80,12 +80,18 @@ enabled only for that session. To enable it for all future Bash sessions, add th
 keep using RedAlien, add the line to your `.bashrc` for a permanent setup.
 
 ```bash
+# RedAlien recommends multiline PS1 prompt.
+PS1='\[\e[1;32m\]\u@\h:\w\$\[\e[0m\]\n'
+
 # Load the RedAlien integration script.
-source ~/.local/share/redalien/redalien-integration.bash
+source ~/.local/share/redalien/bin/redalien-integration.bash
 ```
 
 You can also install RedAlien in a directory other than `~/.local/share`. If you do,
 replace `~/.local/share` in the commands above with your preferred installation path.
+
+As shown in the above code snippet, RedAlien recommends using a multiline prompt.
+The recommended prompt setting is provided in the FAQ section below.
 
 ### Uninstallation
 
@@ -274,6 +280,25 @@ the cursor. For details, see the section on key binding settings in `config.toml
 Frequently Asked Questions
 ----------------------------------------------------------------------------------------------------
 
+### Recommended Prompt Setting
+
+```shell
+# Setup prompt strings and command called before the prompt.
+HLINE='\[\e[38;2;112;120;128m\]$(printf "%.0s⎯" $(seq 1 $(tput cols)))\[\e[0m\]'  # Horizontal line
+PELM1='\[\e[38;2;204;102;102m\]\u \[\e[38;2;112;120;128m\]/ '                     # Prompt element 1
+PELM2='\[\e[38;2;181;189;104m\]\h \[\e[38;2;112;120;128m\]/ '                     # Prompt element 2
+PELM3='\[\e[38;2;235;193;111m\]\d \[\e[38;2;112;120;128m\]/ '                     # Prompt element 3
+PELM4='\[\e[38;2;129;162;190m\]\t \[\e[38;2;112;120;128m\]/ '                     # Prompt element 4
+PELM5='\[\e[38;2;178;148;187m\]\w\[\e[0m\]'                                       # Prompt element 5
+PS1="${HLINE}\n${PELM1}${PELM2}${PELM3}${PELM4}${PELM5}\n"
+PS2="\[\e[36m\]>\[\e[0m\] "
+unset HLINE PELM1 PELM2 PELM3 PELM4 PELM5
+
+# Specify the install directory path to REDALIEN_PATH, and call the integration script.
+REDALIEN_PATH="${HOME}/.local/share/redalien"
+source "${REDALIEN_PATH}/bin/redalien-integration.bash"
+```
+
 ### How Does RedAlien Work?
 
 RedAlien augments standard Readline behavior by automatically triggering a key binding through the
@@ -332,6 +357,7 @@ Gratitude
 
 This software uses the following libraries.
 I appreciate their devoted contributions to these libraries.
+* [carapace-bin](https://carapace.sh/): A command-line completion framework for Bash, Zsh, and Fish.
 * [cxxopts](https://github.com/jarro2783/cxxopts): Header-only C++ command line parser.
 * [ncurses](https://invisible-island.net/ncurses/): Terminal handling library for TUI.
 * [nlohmann/json](https://github.com/nlohmann/json): Header-only JSON parser for C++.

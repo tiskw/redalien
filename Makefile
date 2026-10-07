@@ -34,6 +34,9 @@ DOCKER_BASE  := run --rm -it -u `id -u`:`id -g` -v `pwd`:/work -w /work
 DOCKER_AMD64 := $(DOCKER_BASE) --platform linux/amd64 $(DOCKER_IMAGE)_amd64
 DOCKER_ARM64 := $(DOCKER_BASE) --platform linux/arm64 $(DOCKER_IMAGE)_arm64
 
+# Detect the architecture of the host machine.
+ARCH := $(shell sh utils/get_arch.sh)
+
 # Colors.
 RED     := \033[38;2;204;102;102m
 GREEN   := \033[38;2;181;189;104m
@@ -128,11 +131,17 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cxx $(SRC_DIR)/%.hxx
 plugins:
 	cd plugins && make build
 
+carapace-bin:
+	cd downloads && make carapace-bin-$(ARCH).tar.gz
+	mkdir -p release/redalien/bin
+	tar -xzf downloads/carapace-bin-$(ARCH).tar.gz -C release/redalien/bin
+	rm -f release/redalien/bin/LICENSE release/redalien/bin/README.md
+
 release:
-	make redalien plugins
 	mkdir -p release/redalien/bin
 	mkdir -p release/redalien/default
 	mkdir -p release/redalien/plugins
+	make redalien plugins carapace-bin
 	cp build/redalien release/redalien/bin
 	cp source/bash/redalien-integration.bash release/redalien/bin
 	cp default/* release/redalien/default
@@ -150,6 +159,10 @@ test:
 
 debug:
 	cd tests; make debug
+
+install:
+	rm -rf ~/.local/share/redalien
+	cat release/redalien_$(shell uname -m).tar.gz | tar xz -C ~/.local/share
 
 #-------------------------------------------------------------------------------
 # Code check commands

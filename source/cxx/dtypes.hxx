@@ -42,17 +42,13 @@ struct Size
 enum class CompType
 // Data type for completion type.
 {
-    NONE      =  0,
-    BASHCOMP  =  1,
-    CARAPACE  =  2,
-    COMMAND   =  3,
-    GREP      =  4,
-    OPTION    =  5,
-    PATH      =  6,
-    PREVIEW   =  7,
-    SHELL     =  8,
-    SUBCMD    =  9,
-    SC_AND_BC = 10,
+    NONE     = 0,
+    CARAPACE = 1,
+    COMMAND  = 2,
+    GREP     = 3,
+    PATH     = 4,
+    PREVIEW  = 5,
+    SHELL    = 6,
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -225,6 +225,11 @@ function __redalien_dsr_kick__ ()
 {   # {{{
 
     __redalien_dsr_pending__=1
+
+    # Disable echo before sending DSR.
+    # This will be restored on PS0 (see __redalien_enable_dsr__).
+    stty -echo </dev/tty 2>/dev/null
+
     printf '\e[5n' > /dev/tty;
 
 }   # }}}
@@ -251,6 +256,10 @@ function __redalien_enable_dsr__ ()
 
     # Setup PROMPT_COMMAND to kick DSR key before each prompt.
     PROMPT_COMMAND="__redalien_dsr_kick__${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+
+    # Restore echo just before each command is executed using PS0.
+    __REDALIEN_ORIG_PS0__="${PS0}"
+    PS0='$(stty echo </dev/tty 2>/dev/null)'"${PS0}"
 
 }   # }}}
 
@@ -318,14 +327,6 @@ function __redalien_setup__ ()
     # Enables the DSR trigger of RedAlien.
     __redalien_enable_dsr__
 
-    # Store the original prompt strings to restore later.
-    __REDALIEN_ORIG_PS1__="${PS1}"
-    __REDALIEN_ORIG_PS2__="${PS2}"
-
-    # Minimize the prompt string to avoid double printing of the prompt.
-    PS1=''
-    PS2=''
-
     # Set the flag to indicate that RedAlien is active.
     export REDALIEN_ACTIVE=1
 
@@ -340,15 +341,15 @@ function __redalien_cleanup__ ()
 {   # {{{
 
     # Remove the key bindings.
-    bind -r "\e[0n"               2>/dev/null
-    bind -r "${__REDALIEN_RELAY__}" 2>/dev/null
-
-    # Restore the original prompt strings.
-    PS1="${__REDALIEN_ORIG_PS1__}"
-    PS2="${__REDALIEN_ORIG_PS2__}"
+    bind -r "\e[0n"                   2>/dev/null
+    bind -r "${__REDALIEN_TRIGGER__}" 2>/dev/null
 
     # Restore the original PROMPT_COMMAND.
     PROMPT_COMMAND="${__REDALIEN_ORIG_PROMPT_COMMAND__}"
+
+    # Restore the original PS0, and restore echo for just in case.
+    PS0="${__REDALIEN_ORIG_PS0__}"
+    stty echo </dev/tty 2>/dev/null
 
     # Remove the temporary directories.
     rm -fr "${__REDALIEN_OUTDIR__}"

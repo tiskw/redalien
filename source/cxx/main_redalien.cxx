@@ -7,11 +7,11 @@
 
 // Include STL headers.
 #include <fstream>
-#include <future>
 #include <iostream>
 
 // Include POSIX headers.
 #include <signal.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // Include the header of the cxxopts library.
@@ -101,102 +101,6 @@ namespace
         struct stat st{};
         return (lstat(path.c_str(), &st) == 0) and S_ISDIR(st.st_mode)
             and (st.st_uid == ::getuid()) and ((st.st_mode & 077) == 0);
-
-    }   // }}}
-
-    void print_ps0(String ps0l, String ps0r, StringView hline_color, StringView hline_char)
-    // Print the prompt string 0.
-    //
-    // [Args]
-    //   ps0l        (String)    : [IN] Left side of the prompt string 0.
-    //   ps0r        (String)    : [IN] Right side of the prompt string 0.
-    //   hline_color (StringView): [IN] Color code of the horizontal line. If empty, the horizontal line will not be printed.
-    //   hline_char  (StringView): [IN] Character for the horizontal line.
-    //
-    // [Notes]
-    //   This function supports simple replacement of variables.
-    //
-    {   // {{{
-
-        // Start to compute git info, because this process takes time.
-        std::future<String> future_git_info;
-        if (ps0r.find("{git}") != String::npos)
-            future_git_info = launch_async(get_git_branch_info);
-
-        // Get terminal size.
-        const Size term_size = get_terminal_size();
-
-        // Print the horizontal line.
-        if (hline_color.size() > 0)
-        {
-            // Create the horizontal line.
-            String hline = String(hline_color);
-            hline.reserve(hline_color.size() + term_size.cols * hline_char.size());
-            for (int c = 0; c < term_size.cols; ++c)
-                hline.append(hline_char);
-
-            // Print the horizontal line.
-            std::cout << hline << "\x1B[0m" << '\n';
-        }
-
-        // Do not print ps0 if empty.
-        if (ps0l.empty() and ps0r.empty())
-            return;
-
-        // Reserve temporary buffer.
-        constexpr SizeType buffer_size = 512;
-        char buffer[buffer_size];
-
-        // Get the current time.
-        time_t raw_time = std::time(nullptr);
-
-        // Replace basic variables.
-        if (ps0l.find("{user}") != String::npos and (getlogin_r(buffer, buffer_size) == 0))
-            ps0l = replace(ps0l, "{user}", buffer);
-        if (ps0l.find("{host}") != String::npos and (gethostname(buffer, buffer_size) == 0))
-            ps0l = replace(ps0l, "{host}", buffer);
-        if (ps0l.find("{date}") != String::npos)
-            ps0l = replace(ps0l, "{date}", get_time(raw_time, "%Y/%m/%d"));
-        if (ps0l.find("{time}") != String::npos)
-            ps0l = replace(ps0l, "{time}", get_time(raw_time, "%H:%M:%S"));
-        if ((ps0l.find("{cwd}") != String::npos) and (getcwd(buffer, buffer_size) != nullptr))
-            ps0l = replace(ps0l, "{cwd}", buffer);
-        if (ps0l.find("{empty}") != String::npos)
-            ps0l = replace(ps0l, "{empty}", "");
-
-        // Replace environmetal variables.
-        while (true)
-        {
-            // Get the location of the open curly brackets.
-            const String::size_type pos1 = ps0l.find("{");
-            if (pos1 == String::npos)
-                break;
-
-            // Get the location of the close curly brackets.
-            const String::size_type pos2 = ps0l.find("}", pos1 + 1);
-            if (pos2 == String::npos)
-                break;
-
-            // Get the replace target and variable name.
-            const String target = ps0l.substr(pos1,     pos2 - pos1 + 1);
-            const String envvar = ps0l.substr(pos1 + 1, pos2 - pos1 - 1);
-            const char*  envval = getenv(envvar.c_str());
-
-            // Replace the target with the environment variable value if exists, otherwise replace with empty string.
-            ps0l = replace(ps0l, target, envval ? envval : "");
-        }
-
-        // Replace the "{git}" variable with the git info.
-        if (ps0r.find("{git}") != String::npos)
-            ps0r = replace(ps0r, "{git}", future_git_info.get());
-
-        // Append whitespaces to the left side of the ps0.
-        SizeType width_ps0 = width(ps0l) + width(ps0r);
-        if (width_ps0 < term_size.cols)
-            ps0l += String(term_size.cols - width_ps0, ' ');
-
-        // Print ps0.
-        std::cout << ps0l << ps0r << std::endl;
 
     }   // }}}
 
@@ -372,9 +276,6 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     // Convert the input_ptr to a String.
     const String input_str = (input_ptr != nullptr) ? String(input_ptr) : String("");
 
-    // Print the prompt 0.
-    print_ps0(cfg.ps0l, cfg.ps0r, cfg.hline_color, cfg.hline_char);
-
     // Initialize text buffer (priority: command line argument > input_ptr).
     ReadCmdOut rc_out = {"", "", "", args.count("input") ? args["input"].as<String>() : input_str};
 
@@ -396,8 +297,9 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     user_input += rc_out.lhs;
     user_input += rc_out.rhs;
 
-    // Print timestamp and a whitespace.
-    std::cout << cfg.datetime_pre << get_time(std::time(nullptr), "%Y/%m/%d %H:%M:%S") << cfg.datetime_post << ' ';
+    // Print timestamp, a whitespace and the colorized user input.
+    std::cout << cfg.datetime_pre << get_time(std::time(nullptr), "%Y/%m/%d %H:%M:%S") << cfg.datetime_post;
+    std::cout << ' ' << colorize(user_input);
 
     // Write the user input to the output file if specified.
     if (args.count("outdir"))

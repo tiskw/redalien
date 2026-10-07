@@ -61,6 +61,25 @@ namespace
 
     }   // }}}
 
+    void show_warn_msg_invalid_ctype(const StringView completion_type)
+    // Show warning message and continue this software.
+    //
+    // [Args]
+    //   completion_type (const StringView): [IN] Completion type string.
+    //   
+    {   // {{{
+
+        // Prepare warning message.
+        std::stringstream ss;
+        ss << "Invalid completion type: " << completion_type << ". ";
+        ss << "It must be one of 'carapace', 'command', 'grep', 'path', 'preview', or 'shell'. ";
+        ss << "Falling back to 'path' completion type.";
+
+        // Print warning message and continue the function.
+        print_error("Warning", ss.str());
+
+    }   // }}}
+
     Vector<String> as_string_vector(const toml::array* array_node)
     // Convert a TOML array node to a vector of strings.
     //
@@ -102,16 +121,12 @@ namespace
         else if ((section == "GENERAL") and (value == "datetime_post" )) cfg.datetime_post  = node.value_or(cfg.datetime_post);
         else if ((section == "GENERAL") and (value == "histhint_pre"  )) cfg.histhint_pre   = node.value_or(cfg.histhint_pre);
         else if ((section == "GENERAL") and (value == "histhint_post" )) cfg.histhint_post  = node.value_or(cfg.histhint_post);
-        else if ((section == "GENERAL") and (value == "hline_char"    )) cfg.hline_char     = node.value_or(cfg.hline_char);
-        else if ((section == "GENERAL") and (value == "hline_color"   )) cfg.hline_color    = node.value_or(cfg.hline_color);
         else if ((section == "GENERAL")                                ) show_error_msg_undefined_entry(section, value);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Read the [PROMPT] section.
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        else if ((section == "PROMPT") and (value == "ps0l")) cfg.ps0l = node.value_or(cfg.ps0l);
-        else if ((section == "PROMPT") and (value == "ps0r")) cfg.ps0r = node.value_or(cfg.ps0r);
         else if ((section == "PROMPT") and (value == "ps1i")) cfg.ps1i = node.value_or(cfg.ps1i);
         else if ((section == "PROMPT") and (value == "ps1n")) cfg.ps1n = node.value_or(cfg.ps1n);
         else if ((section == "PROMPT") and (value == "ps2" )) cfg.ps2  = node.value_or(cfg.ps2);
@@ -161,17 +176,13 @@ namespace
 
                 // Compute completion type.
                 CompType ctype;
-                if      (strcmp(ctype_strptr, "bashcomp")        == 0) ctype = CompType::BASHCOMP;
-                else if (strcmp(ctype_strptr, "carapace")        == 0) ctype = CompType::CARAPACE;
-                else if (strcmp(ctype_strptr, "command")         == 0) ctype = CompType::COMMAND;
-                else if (strcmp(ctype_strptr, "grep")            == 0) ctype = CompType::GREP;
-                else if (strcmp(ctype_strptr, "option")          == 0) ctype = CompType::OPTION;
-                else if (strcmp(ctype_strptr, "path")            == 0) ctype = CompType::PATH;
-                else if (strcmp(ctype_strptr, "preview")         == 0) ctype = CompType::PREVIEW;
-                else if (strcmp(ctype_strptr, "shell")           == 0) ctype = CompType::SHELL;
-                else if (strcmp(ctype_strptr, "subcmd")          == 0) ctype = CompType::SUBCMD;
-                else if (strcmp(ctype_strptr, "subcmd+bashcomp") == 0) ctype = CompType::SC_AND_BC;
-                else                                                   ctype = CompType::PATH;
+                if      (strcmp(ctype_strptr, "carapace") == 0) { ctype = CompType::CARAPACE; }
+                else if (strcmp(ctype_strptr, "command")  == 0) { ctype = CompType::COMMAND;  }
+                else if (strcmp(ctype_strptr, "grep")     == 0) { ctype = CompType::GREP;     }
+                else if (strcmp(ctype_strptr, "path")     == 0) { ctype = CompType::PATH;     }
+                else if (strcmp(ctype_strptr, "preview")  == 0) { ctype = CompType::PREVIEW;  }
+                else if (strcmp(ctype_strptr, "shell")    == 0) { ctype = CompType::SHELL;    }
+                else                                            { ctype = CompType::PATH; show_warn_msg_invalid_ctype(ctype_strptr); }
 
                 ////////////////////////////////////////////////////////////////////////////////////
                 // Read optional string

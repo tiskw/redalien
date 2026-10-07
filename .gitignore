@@ -1,6 +1,8 @@
 # Ignore build outputs.
 /build/**
 /release/**
+/plugins/build/**
+/plugins/*/objects/**
 
 # Ignore plugins build outputs.
 /plugins/build/**
@@ -12,6 +14,7 @@
 # Ignore cache files.
 __pycache__
 .mypy_cache
+downloads/*.tar.gz
 
 # Ignore test files.
 /tests/source

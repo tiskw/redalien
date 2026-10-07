@@ -14,35 +14,27 @@ using json = nlohmann::json;
 #include "utils.hxx"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CarapaceService: Constructors and destructors
+// File-local functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-CarapaceService::CarapaceService(void)
-{ /* Do nothing. */ }
-
-CarapaceService::~CarapaceService(void)
-{ /* Do nothing. */ }
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CarapaceService: Member functions
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-Generator<Pair<StringView, StringView>> CarapaceService::complete(const Vector<StringView>& tokens)
-{   // {{{
-
-    constexpr auto sort_func = [](const Pair<StringView, StringView>& p1, const Pair<StringView, StringView>& p2) noexcept -> bool
+// Unnamed namespace for making classes and functions file-local.
+namespace
+{
+    bool sort_func(const Tuple<StringView, StringView, StringView>& t1, const Tuple<StringView, StringView, StringView>& t2) noexcept
     // Sort the completion candidates based on their values and whether they are directories or files.
     //
     // [Args]
-    //   p1 (const Pair<StringView, StringView>&): [IN] First pair to compare.
-    //   p2 (const Pair<StringView, StringView>&): [IN] Second pair to compare.
+    //   t1 (const Tuple<StringView, StringView, StringView>&): [IN] First tuple to compare.
+    //   t2 (const Tuple<StringView, StringView, StringView>&): [IN] Second tuple to compare.
     //
     // [Returns]
-    //   (bool): True if the first pair should come before the second pair, false otherwise.
-    {
+    //   (bool): True if the first tuple should come before the second tuple, false otherwise.
+    //
+    {   // {{{
+
         // Get the value of the pairs.
-        const StringView s1 = p1.first;
-        const StringView s2 = p2.first;
+        const StringView s1 = std::get<0>(t1);
+        const StringView s2 = std::get<0>(t2);
 
         // Determine if the values are directories (ending with '/').
         const bool is_dir1 = (s1.size() > 0) and (s1.back() == '/');
@@ -53,10 +45,46 @@ Generator<Pair<StringView, StringView>> CarapaceService::complete(const Vector<S
         else if (is_dir1            ) return true;
         else if (            is_dir2) return false;
         else                          return (s1 < s2);
-    };
+
+    }   // }}}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CarapaceService: Constructors and destructors
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+CarapaceService::CarapaceService(const RedAlienConfig& cfg) : colors(cfg.colors)
+{   // {{{
+
+    // Determine the path to the "carapace" binary executable based on the current executable's path.
+    this->path_carapace_bin = get_executable_path().parent_path() / "carapace";
+
+    // If the "carapace" binary does not exist at the determined path, set the path to an empty string.
+    if (not stdfs::exists(this->path_carapace_bin))
+        this->path_carapace_bin = Path("");
+
+}   // }}}
+
+CarapaceService::~CarapaceService(void)
+{ /* Do nothing. */ }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CarapaceService: Member functions
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Generator<Tuple<StringView, StringView, const char*>> CarapaceService::complete(const Vector<StringView>& tokens)
+{   // {{{
+
+    // Do nothing if the path to the "carapace" binary is not available.
+    if (this->path_carapace_bin.empty()) co_return;
 
     // Do nothing if no tokens are provided.
     if (tokens.size() < 2) co_return;
+
+    // Clean up the cache if the size of the cache exceeds the threshold.
+    constexpr SizeType max_cache_entries = 256;
+    if (this->cache.size() >= max_cache_entries)
+        this->cache.clear();
 
     // Prepare the command to run "carapace" with the given tokens.
     uint64_t hash_val = hash(tokens[0]);
@@ -66,55 +94,71 @@ Generator<Pair<StringView, StringView>> CarapaceService::complete(const Vector<S
     if (not this->cache.contains(hash_val))
     {
         // Prepare the command to run "carapace" with the given tokens:
-        //     args = ["carapace", tokens[0], "export", tokens[0], tokens[1], ..., ""]
-        Vector<StringView> args = {"carapace", tokens.front(), "export"};
-        args.insert(args.end(), tokens.begin(), tokens.end() - 1);
-        args.emplace_back("");
+        //     args = ["path/to/carapace", tokens[0], "export", tokens[0], tokens[1], ...]
+        Vector<StringView> args = {this->path_carapace_bin.c_str(), tokens.front(), "export"};
+        args.insert(args.end(), tokens.begin(), tokens.end());
 
         try
         {
             // Parse the command output as JSON.
             const json result_json = json::parse(run_command(args, RUN_COMMAND_GETOUT));
 
+            // Accept only {"values": [...]}; anything else yields no candidates.
+            if ((not result_json.is_object()) or (not result_json.contains("values")) or (not result_json.at("values").is_array()))
+                co_return;
+
             // Initialize flags.
             bool is_dir_completion = false;
 
-            this->cache[hash_val] = {};
+            // Parse the JSON output and extract completion candidates.
+            Vector<Tuple<String, String, const char*>> candidates;
             for (const json& item : result_json["values"])
             {
                 // Get the completion candidate and its display string from the JSON object.
-                const String value   = item.value("value",       "");
-                const String display = item.value("display",     "");
-                const String style   = item.value("style",       "");
-                const String tag     = item.value("tag",         "");
+                const String value   = item.value("value",   "");
+                const String display = item.value("display", "");
+                const String style   = item.value("style",   "");
+                const String tag     = item.value("tag",     "");
 
                 // Check if the completion candidate is a directory based on its tag.
                 if ((not is_dir_completion) and (tag == "files"))
                     is_dir_completion = true;
 
                 // Register the completion candidate and its display string in the cache.
-                this->cache[hash_val].emplace_back(value, display);
-
-                // Colorize the display string based on its style and tag.
-                if ((tag == "files") and style.contains("blue"))
-                    this->cache[hash_val].back().second = "\x1B[38;2;97;175;239m" + this->cache[hash_val].back().second + "\x1B[m";
+                candidates.emplace_back(value, display, get_color(style));
             }
+
+            // Store the completion candidates in the cache for future use.
+            this->cache[hash_val] = std::move(candidates);
 
             // Sort list results.
             if (is_dir_completion)
                 std::sort(this->cache[hash_val].begin(), this->cache[hash_val].end(), sort_func);
         }
-        catch (const json::parse_error&)
+        // If an error occurs while parsing the JSON output, return without yielding any completion candidates.
+        catch (const json::exception&)
         {
-            // If an error occurs while parsing the JSON output, return without yielding any completion candidates.
             co_return;
         }
     }
 
     // Yield the completion candidates that match the last token.
-    for (const Pair<String, String>& pair : this->cache[hash_val])
-        if (pair.first.starts_with(tokens.back()))
-            co_yield {pair.first, pair.second};
+    for (const auto& [value, display, style] : this->cache[hash_val])
+        if (value.starts_with(tokens.back()))
+            co_yield {value, display, style};
+
+}   // }}}
+
+const char* CarapaceService::get_color(StringView style) const
+{   // {{{
+
+    // The style string returned from "carapace" is a space-separated string of style names.
+    // See <https://carapace-sh.github.io/carapace-bin/style.html> for more details.
+    // The following code supports only the color name styles.
+    for (const StringView sv : split(style, " "))
+        if (auto it = colors.find(sv); it != colors.end())
+            return it->second.c_str();
+    return "";
 
 }   // }}}
 

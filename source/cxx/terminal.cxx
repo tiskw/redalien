@@ -280,10 +280,8 @@ void TermUserIF::update(StringView lhs, StringView rhs, StringView ps1, StringVi
                         StringView hist_comp, StringView histhint_pre, StringView histhint_post)
 {   // {{{
 
-    // Colorize the editing line.
-    String edit_line;
-
     // If the right-hand side of the editing line is not empty, colorize the whole line.
+    String edit_line;
     if (not rhs.empty())
     {
         edit_line += lhs;

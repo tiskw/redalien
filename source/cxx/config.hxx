@@ -41,17 +41,9 @@ struct RedAlienConfig
     String histhint_pre  = "";
     String histhint_post = "";
 
-    // Horizontal line character and its color.
-    String hline_char  = "-";
-    String hline_color = "";
-
     ////////////////////////////////////////////////////////////////////////////
     // Prompt strings.
     ////////////////////////////////////////////////////////////////////////////
-
-    // Zero-th prompt string (left and right).
-    String ps0l = "";
-    String ps0r = "";
 
     // First prompt string when insert mode.
     String ps1i = "=>> ";
@@ -75,11 +67,11 @@ struct RedAlienConfig
 
     // Completion patterns and their types and optional strings.
     Vector<Completion> completions = {
-        {{"[./~].*"},        CompType::PATH,    ""},
-        {{".+",},            CompType::COMMAND, ""},
-        {{">>", "-.*"},      CompType::OPTION,  ""},
-        {{">>", "FILE", ""}, CompType::PREVIEW, ""},
-        {{">>", ".*"},       CompType::PATH,    ""},
+        {{""},               CompType::PATH,     ""},
+        {{"[./~].*"},        CompType::PATH,     ""},
+        {{".+",},            CompType::COMMAND,  ""},
+        {{">>", "FILE", ""}, CompType::PREVIEW,  ""},
+        {{">>", ".*"},       CompType::CARAPACE, ""},
     };
 
     ////////////////////////////////////////////////////////////////////////////
@@ -108,15 +100,15 @@ struct RedAlienConfig
     // Color settings.
     ////////////////////////////////////////////////////////////////////////////
 
-    Map<String, String> colors = {
-        {"R", "\x1B[38;2;204;102;102m"},  // Red
-        {"G", "\x1B[38;2;181;189;104m"},  // Green
-        {"Y", "\x1B[38;2;240;198;116m"},  // Yellow
-        {"B", "\x1B[38;2;129;162;190m"},  // Blue
-        {"M", "\x1B[38;2;178;148;187m"},  // Magenta
-        {"C", "\x1B[38;2;138;190;183m"},  // Cyan
-        {"A", "\x1B[38;2;197;200;198m"},  // Gray
-        {"-", "\x1B[0m"},                 // Reset
+    StringMap colors = {
+        {"red",     "\x1B[38;2;204;102;102m"},  // Red
+        {"green",   "\x1B[38;2;181;189;104m"},  // Green
+        {"yellow",  "\x1B[38;2;240;198;116m"},  // Yellow
+        {"blue",    "\x1B[38;2;129;162;190m"},  // Blue
+        {"magenta", "\x1B[38;2;178;148;187m"},  // Magenta
+        {"cyan",    "\x1B[38;2;138;190;183m"},  // Cyan
+        {"gray",    "\x1B[38;2;197;200;198m"},  // Gray
+        {"reset",   "\x1B[0m"},                 // Reset
     };
 };
 

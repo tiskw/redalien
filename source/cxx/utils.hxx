@@ -103,6 +103,13 @@ String expand_tilde(StringView path);
 // [Returns]
 //   (String): Output path.
 
+Path get_executable_path(void);
+// Get the path of the current executable. This function reads the symbolic link
+// "/proc/self/exe" to determine the path of the currently running executable.
+//
+// [Returns]
+//   (Path): Path of the current executable.
+
 Size get_terminal_size(void) noexcept;
 // Get terminal size.
 //

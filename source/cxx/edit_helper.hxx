@@ -12,7 +12,6 @@
 #include <future>
 
 // Include the headers of custom modules.
-#include "bash_completer.hxx"
 #include "carapace_service.hxx"
 #include "config.hxx"
 #include "dtypes.hxx"
@@ -70,10 +69,6 @@ class EditHelper
         Size area_size;
         // Size of the drawing area.
 
-        Optional<BashCompleter> bash_completer;
-        // An instance of BashCompleter for computing completion candidates from "bash-complete".
-        // The "Optional" is used to avoid unnecessary initialization of the BashCompleter instance.
-
         CarapaceService carapace_service;
         // An instance of CarapaceService for computing completion candidates from "carapace".
 
@@ -83,12 +78,6 @@ class EditHelper
         CandCacheMap cache_cands_lhs;
         // Cache of completion candidates, where the key is the hash value of the left-hand-side
         // string of the completion target.
-
-        Map<String, Vector<Tuple<String, String>>> cache_opt;
-        // Cache of the command options.
-
-        StrVecMap cache_subcmd;
-        // Cache of the command options.
 
         Vector<Pair<String, String>>* cands = nullptr;
         // Completion candidates. This is a pointer to the instance on cache_cands_lhs.
@@ -135,12 +124,6 @@ class EditHelper
         // Private functions
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        void cands_bashcomp(const Vector<StringView>& tokens);
-        // Compute completion candidates from bash-completion.
-        //
-        // [Args]
-        //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
-
         void cands_command(const Vector<StringView>& tokens, const String& option);
         // Compute command completion candidates.
         // The result candidates will be stored in `this->cands`.
@@ -169,13 +152,6 @@ class EditHelper
         //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
         //   option (const String&)           : [IN] Optional string (tab-separated string).
 
-        void cands_option(const Vector<StringView>& tokens);
-        // Compute command option candidates.
-        // The result candidates will be stored in `this->cands`.
-        //
-        // [Args]
-        //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
-
         void cands_preview(const Vector<StringView>& tokens);
         // Compute completion candidates for preview.
         //
@@ -188,20 +164,6 @@ class EditHelper
         // [Args]
         //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
         //   option (const String&)           : [IN] Optional string (normally it is a shell command).
-
-        void cands_subcmd(const Vector<StringView>& tokens, const String& option);
-        // Compute completion candidates from sub command.
-        //
-        // [Args]
-        //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
-        //   option (const String&)           : [IN] Optional string.
-
-        void cands_sc_and_bc(const Vector<StringView>& tokens, const String& option);
-        // Combination of sub command and bash-completion candidates.
-        //
-        // [Args]
-        //   tokens (const Vector<StringView>): [IN] Parsed tokens of the user input.
-        //   option (const String&)           : [IN] Optional string.
 
         void lines_from_cands(const Vector<Pair<String, String>>& cands);
         // Convert candidate to strings that will be shown to users.

@@ -27,10 +27,6 @@ datetime_post = "]\u001B[0m"
 histhint_pre  = "\u001B[38;2;112;120;128m"
 histhint_post = "\u001B[0m"
 
-# Horizontal line character and its color.
-hline_char  = "\u23AF"
-hline_color = "\u001B[38;2;112;120;128m"
-
 ####################################################################################################
 # Prompt settings
 ####################################################################################################
@@ -38,17 +34,9 @@ hline_color = "\u001B[38;2;112;120;128m"
 
 # Prompts for editing area. The layout of prompt is the following.
 #
-# <- ps0l ---------------------------------><- ps0r ->
 # <- ps1i or ps1n -> <- user input ------------------>
 # <- ps2 -> <- user input --------------------------->
 #
-ps0l = """{PS1}\
-\u001B[38;2;204;102;102m{USER} \u001B[38;2;197;200;198m: \
-\u001B[38;2;181;189;104m{host} \u001B[38;2;197;200;198m: \
-\u001B[38;2;235;193;111m{date} \u001B[38;2;197;200;198m: \
-\u001B[38;2;129;162;190m{time} \u001B[38;2;197;200;198m: \
-\u001B[38;2;178;148;187m{cwd}\u001B[0m"""
-ps0r = "{git}"
 ps1i = "\u001B[37m=>>\u001B[m "
 ps1n = "\u001B[37m<<=\u001B[m "
 ps2  = "\u001B[37m...\u001B[m "
@@ -71,12 +59,6 @@ ps2  = "\u001B[37m...\u001B[m "
 
 completions = [
 
-    # Bash-completion-based command completions.
-    [["apt",     ">>", ".*"], "subcmd+bashcomp", "apt --help"],
-    [["kubectl", ">>", ".*"], "subcmd+bashcomp", "kubectl --help"],
-    [["docker",  ">>", ".*"], "subcmd+bashcomp", "docker --help"],
-    [["git",     ">>", ".*"], "subcmd+bashcomp", "git --help"],
-
     # Make command completions.
     [["make", ".*"], "grep", "Makefile\t(^[a-zA-Z0-9_-]+):"],
 
@@ -84,11 +66,11 @@ completions = [
     [["ssh", ".*"], "grep", "~/.ssh/config\tHost ([a-zA-Z0-9_-]+)"],
 
     # General completions.
-    [["[./~].*",],       "path",    ""],
-    [[".+",],            "command", ""],
-    [[">>", "-.*"],      "option",  ""],
-    [[">>", "FILE", ""], "preview", ""],
-    [[">>", ".*"],       "path",    ""],
+    [["",],              "path",     ""],
+    [["[./~].*",],       "path",     ""],
+    [[".+",],            "command",  ""],
+    [[">>", "FILE", ""], "preview",  ""],
+    [[">>", ".*"],       "carapace", ""],
 ]
 
 ####################################################################################################
