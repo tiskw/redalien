@@ -25,7 +25,7 @@ OBJ_FILES := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/%,$(CXX_FILES:.cxx=.o))
 
 # Compile command.
 CC     := g++ -std=c++23
-CFLAGS := -O3 -march=native -flto=auto -Wall -Wextra -I/usr/local/include
+CFLAGS := -O3 -flto=auto -Wall -Wextra -I/usr/local/include
 LIBS   := -L/usr/local/lib
 
 # Commands for Docker-based static build.

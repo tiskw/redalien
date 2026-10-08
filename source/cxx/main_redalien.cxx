@@ -104,6 +104,34 @@ namespace
 
     }   // }}}
 
+    void print_ps_ex(const String& ps_ex)
+    // Print the extra prompt string at the right end of the line above the user input line.
+    //
+    // [Args]
+    //   ps_ex (const String&): [IN] Extra prompt string to be printed.
+    //
+    {   // {{{
+
+        // Do nothing if the given extra prompt string is empty.
+        if (ps_ex.empty()) return;
+
+        // Replace the placeholder "{git}".
+        const String target = replace(ps_ex, "{git}", get_git_branch_info());
+
+        // Do nothing if the target string is empty.
+        if (target.empty()) return;
+
+        // Compute the width of the extra prompt string.
+        int32_t width_target = width(target);
+
+        // Get the terminal size.
+        Size term_size = get_terminal_size();
+
+        // Print the extra prompt string at the right end of the editing line.
+        std::cout << std::format("\x1B[1F\x1B[{}G{}\x1B[1E", term_size.cols - width_target, target) << std::flush;
+
+    }   // }}}
+
     Deque<String> read_history(StringView path_hist, uint16_t max_hist_size)
     // Read history file and return history entries.
     //
@@ -239,6 +267,13 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
         return EXIT_SUCCESS;
     }
 
+    // Print version information and exit if -v/--version is specified.
+    if (args.count("version")) 
+    {
+        std::cout << VERSION << '\n';
+        return EXIT_SUCCESS;
+    }
+
     // Run other task and exit if -r/--run is specified.
     if (args.count("gen-cache"))
         return generate_path_commands_cache();
@@ -278,6 +313,9 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
 
     // Initialize text buffer (priority: command line argument > input_ptr).
     ReadCmdOut rc_out = {"", "", "", args.count("input") ? args["input"].as<String>() : input_str};
+
+    // Print the extra prompt string if specified in the config file.
+    print_ps_ex(cfg.ps_ex);
 
     // Start user editing loop.
     while (true)

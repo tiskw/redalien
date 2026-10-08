@@ -34,12 +34,19 @@ histhint_post = "\u001B[0m"
 
 # Prompts for editing area. The layout of prompt is the following.
 #
+# <- Bash's PS1 ----------> <- ps_ex (is specified) ->
 # <- ps1i or ps1n -> <- user input ------------------>
 # <- ps2 -> <- user input --------------------------->
-#
-ps1i = "\u001B[37m=>>\u001B[m "
-ps1n = "\u001B[37m<<=\u001B[m "
-ps2  = "\u001B[37m...\u001B[m "
+
+# Prompt for the first line of the editing area.
+ps1i = "\u001B[37m=>>\u001B[m "   # Insert mode of Vi-style editor, or Emacs-style editor.
+ps1n = "\u001B[37m<<=\u001B[m "   # Normal mode of Vi-style editor.
+
+# Prompt from the second line onwords.
+ps2 = "\u001B[37m...\u001B[m "
+
+# Additional string to be displayed at the end of the above the editing area.
+ps_ex = "{git}"
 
 ####################################################################################################
 # Keybind settings

@@ -127,10 +127,11 @@ namespace
         // Read the [PROMPT] section.
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        else if ((section == "PROMPT") and (value == "ps1i")) cfg.ps1i = node.value_or(cfg.ps1i);
-        else if ((section == "PROMPT") and (value == "ps1n")) cfg.ps1n = node.value_or(cfg.ps1n);
-        else if ((section == "PROMPT") and (value == "ps2" )) cfg.ps2  = node.value_or(cfg.ps2);
-        else if ((section == "PROMPT")                      ) show_error_msg_undefined_entry(section, value);
+        else if ((section == "PROMPT") and (value == "ps1i" )) cfg.ps1i  = node.value_or(cfg.ps1i);
+        else if ((section == "PROMPT") and (value == "ps1n" )) cfg.ps1n  = node.value_or(cfg.ps1n);
+        else if ((section == "PROMPT") and (value == "ps2"  )) cfg.ps2   = node.value_or(cfg.ps2);
+        else if ((section == "PROMPT") and (value == "ps_ex")) cfg.ps_ex = node.value_or(cfg.ps_ex);
+        else if ((section == "PROMPT")                       ) show_error_msg_undefined_entry(section, value);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Read the [KEYBIND] section.

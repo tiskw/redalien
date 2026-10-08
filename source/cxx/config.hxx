@@ -54,12 +54,15 @@ struct RedAlienConfig
     // Second prompt string.
     String ps2 = "... ";
 
+    // Additional prompt string.
+    String ps_ex = "";
+
     ////////////////////////////////////////////////////////////////////////////
     // Keybind settings.
     ////////////////////////////////////////////////////////////////////////////
 
-    // Map of input key and command.
     StringMap keybinds;
+    // Map of input key and command.
 
     ////////////////////////////////////////////////////////////////////////////
     // Completion settings.
@@ -104,7 +107,7 @@ struct RedAlienConfig
         {"red",     "\x1B[38;2;204;102;102m"},  // Red
         {"green",   "\x1B[38;2;181;189;104m"},  // Green
         {"yellow",  "\x1B[38;2;240;198;116m"},  // Yellow
-        {"blue",    "\x1B[38;2;129;162;190m"},  // Blue
+        {"blue",    "\x1B[38;2;100;175;239m"},  // Blue
         {"magenta", "\x1B[38;2;178;148;187m"},  // Magenta
         {"cyan",    "\x1B[38;2;138;190;183m"},  // Cyan
         {"gray",    "\x1B[38;2;197;200;198m"},  // Gray
