@@ -125,7 +125,7 @@ Generator<Tuple<StringView, StringView, const char*>> CarapaceService::complete(
                     is_dir_completion = true;
 
                 // Register the completion candidate and its display string in the cache.
-                candidates.emplace_back(value, display, get_color(style));
+                candidates.emplace_back(value, display, this->get_color(style));
             }
 
             // Store the completion candidates in the cache for future use.

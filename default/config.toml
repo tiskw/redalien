@@ -34,9 +34,9 @@ histhint_post = "\u001B[0m"
 
 # Prompts for editing area. The layout of prompt is the following.
 #
-# <- Bash's PS1 ----------> <- ps_ex (is specified) ->
-# <- ps1i or ps1n -> <- user input ------------------>
-# <- ps2 -> <- user input --------------------------->
+# <- Bash's PS1 (if multiline) --------> <- ps_ex (is specified) ->
+# <- ps1i or ps1n -> <- user input ------------------------------->
+# <- ps2 -> <- user input ---------------------------------------->
 
 # Prompt for the first line of the editing area.
 ps1i = "\u001B[37m=>>\u001B[m "   # Insert mode of Vi-style editor, or Emacs-style editor.
@@ -53,11 +53,32 @@ ps_ex = "{git}"
 ####################################################################################################
 [KEYBIND]
 
-"^F" = "{path_plugin}/omnipicker -m file -o {output_plugin} -l {lhs} -r {rhs}"
-"^L" = "clear"
-"^U" = "{path_plugin}/omnipicker -m hist -o {output_plugin} -l {lhs} -r {rhs}"
-"^P" = "{path_plugin}/omnipicker -m pid -o {output_plugin} -l {lhs} -r {rhs}"
-"^V" = "xclip -o"
+# Key bindings for completion.
+candidate_completion_key = "^I"
+
+# Key bindings for history completion.
+history_completion_key = "^E"
+
+# Key bindings for plugins. The format of each element is [key, command],
+# where key is a string of a single key, and command is a string of a command to be executed.
+#
+# The following placeholders are available in the command string:
+#   - {path_plugin}: path to the plugin directory.
+#   - {output_plugin}: path to the output file of the plugin.
+#   - {lhs}: left-hand side of the editing area.
+#   - {rhs}: right-hand side of the editing area.
+#
+plugin_trigger_keys = [
+
+    # Key bindings for omnipicker plugin.
+    ["^F", "{path_plugin}/omnipicker -m file -o {output_plugin} -l {lhs} -r {rhs}"],
+    ["^R", "{path_plugin}/omnipicker -m hist -o {output_plugin} -l {lhs} -r {rhs}"],
+    ["^P", "{path_plugin}/omnipicker -m pid  -o {output_plugin} -l {lhs} -r {rhs}"],
+
+    # Other shortcut keys.
+    ["^L", "clear"],
+    ["^V", "xclip -o"],
+]
 
 ####################################################################################################
 # Completion settings
@@ -90,16 +111,16 @@ completions = [
 previews = [
 
     # Text files: preview using batcat.
-    ["text/*", ["batcat", "--color=always", "--paging=never", "--style=plain", "--theme=ansi", "--line-range=:64", "{path}"]],
+    ["text/*", "batcat --color=always --paging=never --style=plain --theme=ansi --line-range=:64 {path}"],
 
     # Archive file: list archive contents.
-    ["*/x-7z-compressed", ["timeout", "0.1s", "7z", "l", "{path}"]],
-    ["*/zip",             ["timeout", "0.1s", "zipinfo", "{path}"]],
+    ["*/x-7z-compressed", "timeout 0.1s 7z l    {path}"],
+    ["*/zip",             "timeout 0.1s zipinfo {path}"],
 
     # Media files: preview using file command.
-    ["audio/*", ["timeout", "0.1s", "file", "{path}"]],
-    ["image/*", ["timeout", "0.1s", "file", "{path}"]],
-    ["video/*", ["timeout", "0.1s", "file", "{path}"]],
+    ["audio/*", "timeout 0.1s file {path}"],
+    ["image/*", "timeout 0.1s file {path}"],
+    ["video/*", "timeout 0.1s file {path}"],
 ]
 
 # Delimiter of the preview window.

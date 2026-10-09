@@ -111,7 +111,7 @@ class EditHelper
         const Vector<Completion> completions;
         // Completion patterns and their types and optional strings.
 
-        const StrVecMap previews;
+        const StringMap previews;
         // Collection of MIME type and its preview command.
 
         const String preview_delim;

@@ -86,4 +86,39 @@ StringView CharX::printable(void) noexcept
 
 }   // }}}
 
+char CharX::parse_printable_char(StringView sv)
+{   // {{{
+
+    // Case 1: Single printable character.
+    if ((sv.size() == 1) and (0x20 <= sv[0]) and (sv[0] <= 0x7E))
+        return sv[0];
+
+    // Case 2: Control character in caret notation.
+    else if ((sv.size() == 2) and (sv[0] == '^') and ('A' <= sv[1]) and (sv[1] <= 'Z'))
+        return static_cast<char>(sv[1] - 0x40);
+
+    // Case 3: Delete character in caret notation.
+    else if ((sv.size() == 2) and (sv[0] == '^') and (sv[1] == '?'))
+        return static_cast<char>(0x7F);
+
+    // Case 4: Escape sequences for special characters.
+    else if ((sv.size() == 2) and (sv[0] == '\\'))
+    {
+        switch (sv[1])
+        {
+            case 'n' : return '\n';
+            case 'r' : return '\r';
+            case 't' : return '\t';
+            case 'b' : return '\b';
+            case 'f' : return '\f';
+            case 'v' : return '\v';
+            case '\\': return '\\';
+        }
+    }
+
+    // Otherwise, return zero to indicate an invalid character.
+    return 0x00;
+
+}   // }}}
+
 // vim: expandtab tabstop=4 shiftwidth=4 fdm=marker

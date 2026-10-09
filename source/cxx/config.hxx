@@ -61,8 +61,17 @@ struct RedAlienConfig
     // Keybind settings.
     ////////////////////////////////////////////////////////////////////////////
 
-    StringMap keybinds;
+    // Key codes for completion and history completion.
+    String cand_comp_key = "^I";  // Ctrl-I (= TAB key)
+    String hist_comp_key = "^E";  // Ctrl-E
+
     // Map of input key and command.
+    StringMap plugin_trigger_keys = {
+        {"^F", "{path_plugin} omnipicker -m file -o {output_plugin} -l {lhs} -r {rhs}"},
+        {"^U", "{path_plugin} omnipicker -m hist -o {output_plugin} -l {lhs} -r {rhs}"},
+        {"^P", "{path_plugin} omnipicker -m pid  -o {output_plugin} -l {lhs} -r {rhs}"},
+        {"^L", "clear"},
+    };
 
     ////////////////////////////////////////////////////////////////////////////
     // Completion settings.
@@ -87,10 +96,10 @@ struct RedAlienConfig
     //
     // NOTE: DO NOT USE double quote characters (") inside the command. Please
     //       use single quote (') instead.
-    StrVecMap previews = {
-        {"audio/*", {"timeout", "0.1s", "file", "{path}"}},
-        {"image/*", {"timeout", "0.1s", "file", "{path}"}},
-        {"video/*", {"timeout", "0.1s", "file", "{path}"}},
+    StringMap previews = {
+        {"audio/*", "timeout 0.1s file {path}"},
+        {"image/*", "timeout 0.1s file {path}"},
+        {"video/*", "timeout 0.1s file {path}"},
     };
 
     // Delimiter of the preview window.

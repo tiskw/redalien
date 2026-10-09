@@ -73,22 +73,16 @@ namespace
 
     }   // }}}
 
-    String get_user_preview(Vector<String>& cmd_args, StringView path)
+    String get_user_preview(Vector<String>& cmd_args)
     // Get the preview output by running the user-defined command.
     //
     // [Args]
     //   cmd_args (Vector<String>&): [IN] Command arguments to be run for previewing.
-    //   path     (StringView)     : [IN] File path of the preview target.
     //
     // [Returns]
     //   (String): Preview output string.
     //
     {   // {{{
-
-        // Replace "{path}" in the command arguments with the actual file path.
-        for (String& arg : cmd_args)
-            if (arg == "{path}")
-                arg = path;
 
         // Get command output, and replace TAB to 4 white spaces.
         return replace(run_command(cmd_args, RUN_COMMAND_GETOUT), "\t", "    ");
@@ -100,7 +94,7 @@ namespace
 // Public functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-Vector<String> preview(StringView path, uint16_t height, const StrVecMap& previews)
+Vector<String> preview(StringView path, uint16_t height, const StringMap& previews)
 {   // {{{
 
     // Instantiate a class to get mime type of a file.
@@ -118,15 +112,42 @@ Vector<String> preview(StringView path, uint16_t height, const StrVecMap& previe
     const String mime_type_target = mime_type.get(path);
 
     // Get the preview command if the matched preview pattern found.
-    Vector<String> cmd_args;
-    for (const auto& [mime_type_pattern, tokens] : previews)
+    String target_command;
+    for (const auto& [mime_type_pattern, command] : previews)
     {
-        if (fnmatch(mime_type_pattern.c_str(), mime_type_target.c_str(), 0) == 0)
-        { cmd_args = tokens; break; }
+        // Try to match the MIME type of the target file with the MIME type pattern.
+        const int32_t match_result = fnmatch(mime_type_pattern.c_str(), mime_type_target.c_str(), 0);
+
+        // If matched, set the target command and break the loop.
+        if (match_result == 0)
+        {
+            target_command = command;
+            break;
+        }
     }
 
-    // Get the preview output.
-    const String output = (cmd_args.empty()) ? get_default_preview(mime_type_target, path) : get_user_preview(cmd_args, path);
+    String output;
+
+    // If the target command is empty, get the default preview output.
+    if (target_command.empty())
+        output = get_default_preview(mime_type_target, path);
+
+    // Otherwise, run the user-defined command to get the preview output.
+    else
+    {
+        // Create a map for placeholders replacement.
+        const StringMap extra = {
+            {"{path}", String(path)},
+        };
+
+        // Tokenize the command string with placeholder replacement.
+        Vector<String> cmd_args;
+        for (const String& token : tokenize_with_placeholder_replacement(target_command, extra, TOKENIZE_DEQUOTE))
+            cmd_args.emplace_back(token);
+
+        // Get the preview output by running the user-defined command or the default preview output if the command is empty.
+        output = (cmd_args.empty()) ? get_default_preview(mime_type_target, path) : get_user_preview(cmd_args);
+    }
 
     // Do nothing if the preview output is empty.
     if (output.empty()) return result;

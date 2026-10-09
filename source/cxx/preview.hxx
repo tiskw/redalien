@@ -17,13 +17,13 @@
 // Public functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-Vector<String> preview(StringView path, uint16_t height, const StrVecMap& previews);
+Vector<String> preview(StringView path, uint16_t height, const StringMap& previews);
 // Returns preview contents of the given file.
 //
 // [Args]
 //   path     (StringView)      : [IN] Path to the target file.
 //   height   (int16_t)         : [IN] Height of preview window.
-//   previews (const StrVecMap&): [IN] Map of the preview commands.
+//   previews (const StringMap&): [IN] Map of the preview commands.
 //
 // [Returns]
 //   (const Vector<String>&): Lines of preview contents.

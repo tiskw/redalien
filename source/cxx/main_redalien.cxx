@@ -63,7 +63,7 @@ namespace
         // Initialize the git branch name and the changed flag.
         String branch     = "???";
         bool   is_changed = false;
-    
+
         for (const StringView sv : split(git_status, "\n"))
         {
             // Get the branch name.
@@ -104,31 +104,32 @@ namespace
 
     }   // }}}
 
-    void print_ps_ex(const String& ps_ex)
+    void print_ps_ex(String ps_ex)
     // Print the extra prompt string at the right end of the line above the user input line.
     //
     // [Args]
-    //   ps_ex (const String&): [IN] Extra prompt string to be printed.
+    //   ps_ex (String): [IN] Extra prompt string to be printed.
     //
     {   // {{{
 
         // Do nothing if the given extra prompt string is empty.
         if (ps_ex.empty()) return;
 
-        // Replace the placeholder "{git}".
-        const String target = replace(ps_ex, "{git}", get_git_branch_info());
+        // Replace the placeholder "{git}" if exists.
+        if (const auto pos = ps_ex.find("{git}"); pos != String::npos)
+            ps_ex.replace(pos, 5, get_git_branch_info());
 
         // Do nothing if the target string is empty.
-        if (target.empty()) return;
+        if (ps_ex.empty()) return;
 
         // Compute the width of the extra prompt string.
-        int32_t width_target = width(target);
+        int32_t width_ps_ex = width(ps_ex);
 
         // Get the terminal size.
         Size term_size = get_terminal_size();
 
         // Print the extra prompt string at the right end of the editing line.
-        std::cout << std::format("\x1B[1F\x1B[{}G{}\x1B[1E", term_size.cols - width_target, target) << std::flush;
+        std::cout << std::format("\x1B[1F\x1B[{}G{}\x1B[1E", term_size.cols - width_ps_ex, ps_ex) << std::flush;
 
     }   // }}}
 
@@ -175,13 +176,13 @@ namespace
 
     }   // }}}
 
-    Tuple<String, String> run_keybind(const ReadCmdOut& rc_out, const StringMap& keybinds, const Path& path_plugin_out)
+    Tuple<String, String> run_plugin(const ReadCmdOut& rc_out, const StringMap& plugin_trigger_keys, const Path& path_plugin_out)
     // Run the given keybind.
     //
     // [Args]
-    //   rc_out        (const ReadCmdOut&): [IN] Output of "readcmd" function.
-    //   keybinds      (const StringMap&) : [IN] Map of keybinds in the config file.
-    //   output_plugin (const String&)    : [IN] Path to the plugin output file.
+    //   rc_out              (const ReadCmdOut&): [IN] Output of "readcmd" function.
+    //   plugin_trigger_keys (const StringMap&) : [IN] Map of keybinds in the config file.
+    //   output_plugin       (const String&)    : [IN] Path to the plugin output file.
     //
     // [Returns]
     //   (Tuple<String, String>): Left and right hand side of the editing buffer after keybind.
@@ -189,7 +190,7 @@ namespace
     {   // {{{
 
         // If the given key is not registered, do nothing.
-        if (not keybinds.contains(rc_out.stop))
+        if (not plugin_trigger_keys.contains(rc_out.stop))
             return {rc_out.lhs, rc_out.rhs};
 
         // Create a map for placeholders replacement.
@@ -200,8 +201,9 @@ namespace
         };
 
         // Tokenize the command string with placeholder replacement.
+        // The {path_plugin} placeholder will be processed in the "tokenize_with_placeholder_replacement" function.
         Vector<String> cmd_tokens;
-        for (const String& token : tokenize_with_placeholder_replacement(keybinds.at(rc_out.stop), extra, TOKENIZE_DEQUOTE))
+        for (const String& token : tokenize_with_placeholder_replacement(plugin_trigger_keys.at(rc_out.stop), extra, TOKENIZE_DEQUOTE))
             cmd_tokens.emplace_back(token);
 
         // Run the tokenized command.
@@ -326,8 +328,9 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
         // Exit from the while loop if the user editing stopped without stop key.
         if (rc_out.stop.size() == 0) break;
 
-        // Otherwise, run keybind command of the stop key, and continue the loop.
-        std::tie(rc_out.lhs, rc_out.rhs) = run_keybind(rc_out, cfg.keybinds, path_plugin_out);
+        // Otherwise, run plugin command of the stop key, and continue the loop.
+        if (cfg.plugin_trigger_keys.contains(rc_out.stop))
+            std::tie(rc_out.lhs, rc_out.rhs) = run_plugin(rc_out, cfg.plugin_trigger_keys, path_plugin_out);
     }
 
     // Compute user input string.

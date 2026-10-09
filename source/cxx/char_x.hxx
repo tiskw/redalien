@@ -61,6 +61,19 @@ class CharX
         // [Returns]
         //   (StringView): Printable representation of the character.
 
+        ////////////////////////////////////////////////////////////////////////////////////////////
+        // Static member functions
+        ////////////////////////////////////////////////////////////////////////////////////////////
+
+        static char parse_printable_char(StringView sv);
+        // Parse the printable representation of a UTF-8 character from a string.
+        //
+        // [Args]
+        //   sv (StringView): [IN] String view of the printable representation of a character.
+        //
+        // [Returns]
+        //   (char): Parsed UTF-8 character.
+
     private:
 
         ////////////////////////////////////////////////////////////////////////////////////////////

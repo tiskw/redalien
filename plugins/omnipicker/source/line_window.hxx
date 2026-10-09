@@ -2,8 +2,8 @@
 /// C++ header file: window.hxx                                                                  ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef WINDOW_HXX
-#define WINDOW_HXX
+#ifndef LINE_WINDOW_HXX
+#define LINE_WINDOW_HXX
 
 // Include custom headers.
 #include "cui.hxx"

@@ -17,7 +17,6 @@
 
 // Include the headers of custom modules.
 #include "async_comp.hxx"
-#include "bash_completer.hxx"
 #include "carapace_service.hxx"
 #include "char_x.hxx"
 #include "cmd_runner.hxx"
@@ -168,107 +167,14 @@ static void test_AsyncComp(void)
 
 }   // }}}
 
-static void test_BashCompleter(void)
-{   // {{{
-
-    // Print header.
-    print_header("Unit test for BashCompleter class");
-
-    ////////////////////////////////////////////////////////
-    // Constructor and destructor
-    ////////////////////////////////////////////////////////
-    {
-        // Constructing BashCompleter spawns a bash child process.
-        // Simply constructing and destroying must not throw or crash.
-        BashCompleter bc;
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: git subcommands with prefix
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // "git sta" should produce completions containing "status" and/or "stash".
-        // Note: bash-completion may append a trailing space to each candidate.
-        const Vector<String> results = bc.complete({"git", "sta"});
-        bool found_status = false;
-        bool found_stash  = false;
-        for (const String& s : results)
-        {
-            // Match with or without trailing space.
-            if (s == "status" || s == "status ") found_status = true;
-            if (s == "stash"  || s == "stash " ) found_stash  = true;
-        }
-        expect(found_status || found_stash);
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: trailing space returns non-empty list
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // "git " (with trailing space) should return the full list of git subcommands.
-        const Vector<String> results = bc.complete({"git", ""});
-        expect(not results.empty());
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: empty input does not crash
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // An empty string is a degenerate input; complete() must not throw or crash.
-        [[maybe_unused]] const Vector<String> results = bc.complete({""});
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: multiple sequential calls on the same object
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // The same BashCompleter instance must handle multiple calls correctly.
-        [[maybe_unused]] const Vector<String> r1 = bc.complete({"ls", "--"});
-        [[maybe_unused]] const Vector<String> r2 = bc.complete({"git", ""});
-        [[maybe_unused]] const Vector<String> r3 = bc.complete({"echo", ""});
-
-        // Each call must return a Vector (possibly empty) without crashing.
-        expect(true);
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: input with single-quote character (shell quoting)
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // Input that contains a single-quote must be shell-quoted correctly and
-        // must not cause the child bash process to hang or crash.
-        [[maybe_unused]] const Vector<String> results = bc.complete({"echo", "'hello"});
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: Make sure the complete process do not execute arbitrary commands (security test)
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-        std::remove("/tmp/ra_pwned_s1");
-        bc.complete({"git", "commit", "-m", "\"$(touch /tmp/ra_pwned_s1)\""});
-        bc.complete({"echo", "`touch /tmp/ra_pwned_s1`"});
-        expect(not stdfs::exists("/tmp/ra_pwned_s1"));
-    }
-
-}   // }}}
-
 static void test_CarapaceService(void)
 {   // {{{
+
     // Print header.
     print_header("Unit test for CarapaceService class");
 
-    CarapaceService service;
+    RedAlienConfig cfg;
+    CarapaceService service(cfg);
 
     ////////////////////////////////////////////////////////
     // Fewer than two tokens: the generator yields nothing
@@ -305,14 +211,14 @@ static void test_CarapaceService(void)
         const Vector<StringView> tokens = {"git", "sta"};
 
         Vector<String> first;
-        for (const auto& [value, display] : service.complete(tokens))
+        for (const auto& [value, display, color_code] : service.complete(tokens))
         {
             (void) display;
             first.emplace_back(value);
         }
 
         Vector<String> second;
-        for (const auto& [value, display] : service.complete(tokens))
+        for (const auto& [value, display, color_code] : service.complete(tokens))
         {
             (void) display;
             second.emplace_back(value);
@@ -396,6 +302,23 @@ static void test_CharX(void)
     CharX cx_null(nullptr, 0);
     expect(cx_null.size() == 0);
     expect(cx_null.printable() == "");
+
+    ////////////////////////////////////////////////////////
+    // parse_printable_char
+    ////////////////////////////////////////////////////////
+
+    expect(CharX::parse_printable_char("^A") == 0x01);
+    expect(CharX::parse_printable_char("^C") == 0x03);
+    expect(CharX::parse_printable_char("^?") == 0x7F);
+    expect(CharX::parse_printable_char("A") == 'A');
+    expect(CharX::parse_printable_char("\\n") == '\t');
+    expect(CharX::parse_printable_char("\\r") == '\r');
+    expect(CharX::parse_printable_char("\\t") == '\t');
+    expect(CharX::parse_printable_char("\\b") == '\b');
+    expect(CharX::parse_printable_char("\\f") == '\f');
+    expect(CharX::parse_printable_char("\\v") == '\v');
+    expect(CharX::parse_printable_char("\\\\") == '\\');
+    expect(CharX::parse_printable_char("あ") == 0x00);
 
 }   // }}}
 
@@ -1276,7 +1199,7 @@ static void test_preview(void)
     print_header("Unit test for preview function");
 
     // An empty previews map is passed to use the default preview behavior.
-    StrVecMap previews;
+    StringMap previews;
 
     // Test 1: preview non-existing file returns empty result.
     expect(preview("/unexisting_file", 100, previews).size() == 0);
@@ -1286,9 +1209,9 @@ static void test_preview(void)
 
     // User-defined preview command ({path} is replaced by the target path)
     {
-        const StrVecMap previews = {
-            {"inode/directory", {"ls",   "{path}"}},
-            {"text/*",          {"echo", "{path}"}},
+        const StringMap previews = {
+            {"inode/directory", "ls {path}"},
+            {"text/*",          "echo {path}"},
         };
 
         // Text file: the output of the user command is returned line by line.
@@ -1305,7 +1228,7 @@ static void test_preview(void)
 
     // Default preview: no matching command is registered
     {
-        const StrVecMap previews;
+        const StringMap previews;
 
         // A text file is read directly (up to the first 1 KiB).
         const Vector<String> lines = preview("Makefile", 5, previews);
@@ -1323,7 +1246,7 @@ static void test_preview(void)
             ofs.write("\x89PNG\r\n\x1A\n", 8);
         }
 
-        const StrVecMap previews;
+        const StringMap previews;
         const Vector<String> lines = preview(path_bin, 5, previews);
         expect(lines.size() > 0);
 
@@ -1338,8 +1261,8 @@ static void test_preview(void)
 
     // A preview command that produces no output yields an empty result
     {
-        const StrVecMap previews = {
-            {"text/*", {"true"}}
+        const StringMap previews = {
+            {"text/*", "true"}
         };
         expect(preview("Makefile", 5, previews).size() == 0);
     }
@@ -1369,15 +1292,18 @@ column_padding = 3
 undefined_key  = "this entry name does not exist"
 
 [PROMPT]
-ps0l = "L"
-ps0r = "R"
-ps1i = "i"
-ps1n = "n"
-ps2  = "2"
+ps1i  = "i"
+ps1n  = "n"
+ps2   = "2"
+ps_ex = "ex"
 undefined_prompt_key = "x"
 
 [KEYBIND]
-"^X" = "echo keybind"
+candidate_completion_key = "^I"
+history_completion_key = "^E"
+plugin_trigger_keys = [
+    ["^X", "echo keybind"],
+]
 
 [COMPLETION]
 completions = [
@@ -1424,12 +1350,11 @@ some_key = 1
     ////////////////////////////////////////////////////////
     // Prompt strings and keybinds
     ////////////////////////////////////////////////////////
-    expect(cfg.ps0l == "L");
-    expect(cfg.ps0r == "R");
-    expect(cfg.ps1i == "i");
-    expect(cfg.ps1n == "n");
-    expect(cfg.ps2  == "2");
-    expect(cfg.keybinds.contains("^X"));
+    expect(cfg.ps1i  == "i");
+    expect(cfg.ps1n  == "n");
+    expect(cfg.ps2   == "2");
+    expect(cfg.ps_ex == "ex");
+    expect(cfg.plugin_trigger_keys.contains("^X"));
 
     ////////////////////////////////////////////////////////
     // Completion entries: only the eleven well-formed entries are registered
@@ -3431,7 +3356,6 @@ int main(void)
 
     // Run all unit test functions.
     test_AsyncComp();
-    test_BashCompleter();
     test_CarapaceService();
     test_CharX();
     test_CmdRunner();
