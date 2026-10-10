@@ -15,7 +15,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Version information, software name, and description of RedAlien.
-inline constexpr const char* VERSION = "2026.09.22";
+inline constexpr const char* VERSION = "2026.10.11";
 inline constexpr const char* SOFTWARE_NAME = "redalien";
 inline constexpr const char* SOFTWARE_DESC = "A next-generation command line editor for Bash";
 
