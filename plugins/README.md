@@ -14,8 +14,6 @@ omnipicker
 ### Usage example
 
 ```
-omnipicker
+omnipicker -m file -l "ls " -r "" -o stdout
 ```
-
-
 
