@@ -148,13 +148,17 @@ ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& 
             if ((c == 0x00) or (c == 0x03))
                 return ReadCmdOut("^C", "", "", inputs);
 
-            // Exit function if Ctrl-D is pressed.
-            else if (c == 0x04)
+            // Exit function if Ctrl-D is pressed and the editing buffer is empty (except for vi command mode).
+            else if ((c == 0x04) and ((editor_name != "vi") or (editor->get_mode() == TextEditor::Mode::INSERT)) and editor->empty())
                 return ReadCmdOut("^D", "", "", inputs);
 
             // History completion.
             else if (c == keycode_hist_comp)
-                editor->set(String(lhs) + String(histmn.complete(lhs)) + " ", rhs);
+            {
+                const StringView hist_comp = histmn.complete(lhs);
+                if (not hist_comp.empty())
+                    editor->set(String(lhs) + String(histmn.complete(lhs)) + " ", rhs);
+            }
 
             // Execute completion.
             else if (c == keycode_cand_comp)

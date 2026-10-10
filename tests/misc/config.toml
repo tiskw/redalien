@@ -12,7 +12,7 @@ area_height = 8
 column_padding = 3
 
 # Path to history file.
-path_history = "~/.bash_history"
+path_history = "/tmp/bash_history"
 
 # The maximum number of histories to read.
 max_hist_size = 5000
@@ -87,11 +87,10 @@ plugin_trigger_keys = [
 
 completions = [
 
-    # Make command completions.
-    [["make", ".*"], "grep", "Makefile\t(^[a-zA-Z0-9_-]+):"],
-
-    # Ssh command completions.
-    [["ssh", ".*"], "grep", "~/.ssh/config\tHost ([a-zA-Z0-9_-]+)"],
+    # For completion tests.
+    [["cat", ".*"], "grep", "misc/config.toml\t(area_height|column_padding|max_hist_size)"],
+    [["make", ".*"], "shell", "grep -Eo '^[a-z]+' Makefile"],
+    [["apk", ".*"], "carapace", ""],
 
     # General completions.
     [["",],              "path",     ""],

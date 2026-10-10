@@ -10,10 +10,22 @@
 #include "grid_window.hxx"
 #include "utils.hxx"
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// File-local helper functions
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Unnamed namespace for making classes and functions file-local.
 namespace
 {
     Vector<String> load_history_tokens(const Path& path)
+    // Load the history tokens from the specified history file path, excluding timestamp lines.
+    //
+    // [Args]
+    //   path (const Path&): [IN] Path to the history file.
+    //
+    // [Returns]
+    //   (Vector<String>): A vector of history tokens (excluding timestamp lines).
+    //
     {   // {{{
 
         constexpr auto is_history_timestamp = [](StringView line) -> bool
@@ -71,10 +83,10 @@ String run_grid_picker(StringView lhs, const OmniPickerConfig& cfg, StringView u
         String key = window.getkey();
 
         // If the user input is Ctrl-D, exit the loop regardless of the window state.
-        if (key == "^D") return {};
+        if (key == "^D") return String(lhs);
 
         // If the user input is exit key, return an empty vector (indicate cancellation).
-        if ((key == "q") or (key == "Q")) return {};
+        if ((key == "q") or (key == "Q")) return String(lhs);
 
         // If the user input is enter key, return the selected path(s).
         if ((key == "^M") or (key == "^J"))

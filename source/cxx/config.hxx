@@ -67,9 +67,9 @@ struct RedAlienConfig
 
     // Map of input key and command.
     StringMap plugin_trigger_keys = {
-        {"^F", "{path_plugin} omnipicker -m file -o {output_plugin} -l {lhs} -r {rhs}"},
-        {"^U", "{path_plugin} omnipicker -m hist -o {output_plugin} -l {lhs} -r {rhs}"},
-        {"^P", "{path_plugin} omnipicker -m pid  -o {output_plugin} -l {lhs} -r {rhs}"},
+        {"^F", "{path_plugin}/omnipicker -m file -o {output_plugin} -l {lhs} -r {rhs}"},
+        {"^R", "{path_plugin}/omnipicker -m hist -o {output_plugin} -l {lhs} -r {rhs}"},
+        {"^P", "{path_plugin}/omnipicker -m pid  -o {output_plugin} -l {lhs} -r {rhs}"},
         {"^L", "clear"},
     };
 

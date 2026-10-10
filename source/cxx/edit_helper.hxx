@@ -89,19 +89,6 @@ class EditHelper
         // Candidate cache entry for NONE case.
 
         ////////////////////////////////////////////////////////////////////////////////////////////
-        // Static member variables
-        ////////////////////////////////////////////////////////////////////////////////////////////
-
-        static std::shared_future<Vector<String>> shared_future_cache_commands;
-        // Shared future instance of the command cache.
-
-        static std::shared_future<Vector<Vector<RegEx>>> shared_future_vec_patterns_regex;
-        // Cache of compiled regular expression patterns for completion matching.
-
-        static std::once_flag flag_init_shared_futures;
-        // A flag for one-time initialization of shared future instances.
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
         // Constant member variables (e.g. copied values from the config data)
         ////////////////////////////////////////////////////////////////////////////////////////////
 

@@ -20,6 +20,47 @@ using json = nlohmann::json;
 // Unnamed namespace for making classes and functions file-local.
 namespace
 {
+    StringView get_carapace_query_prefix(StringView last_token)
+    // Get the prefix for the carapace query from the last token.
+    //
+    // [Args]
+    //   last_token (StringView): [IN] The last token of the command line.
+    //
+    // [Returns]
+    //   (StringView): The prefix for the carapace query.
+    //
+    {   // {{{
+
+        // Long option: "--xxx=y" returns "--xxx=", "--xxx" returns "--".
+        if (last_token.starts_with("--"))
+        {
+            const SizeType pos_equal = last_token.find('=');
+            return (pos_equal == StringView::npos) ? last_token.substr(0, 2) : last_token.substr(0, pos_equal + 1);
+        }
+
+        // Short option: "-x" returns "-", "-xxx" returns "-", "-x=y" returns "-x=".
+        if (last_token.starts_with("-"))
+        {
+            const SizeType pos_equal = last_token.find('=');
+            return (pos_equal == StringView::npos) ? last_token.substr(0, 1) : last_token.substr(0, pos_equal + 1);
+        }
+
+        // Otherwise: Keep up to the last delimiter character ('/', '=', ':', ',', '@').
+        const SizeType pos_delim = last_token.find_last_of("/=:,@");
+
+        // If no delimiter is found, return an empty string.
+        if (pos_delim == StringView::npos) return StringView("");
+
+        // If the next character after the delimiter is a dot ('.'), include it in the prefix.
+        const SizeType len = pos_delim + 1;
+        if ((len < last_token.size()) and (last_token[len] == '.'))
+            return last_token.substr(0, len + 1);
+
+        // Otherwise, return the substring up to the last delimiter.
+        return last_token.substr(0, len);
+
+    }   // }}}
+
     bool sort_func(const Tuple<StringView, StringView, StringView>& t1, const Tuple<StringView, StringView, StringView>& t2) noexcept
     // Sort the completion candidates based on their values and whether they are directories or files.
     //
@@ -60,7 +101,8 @@ CarapaceService::CarapaceService(const RedAlienConfig& cfg) : colors(cfg.colors)
     this->path_carapace_bin = get_executable_path().parent_path() / "carapace";
 
     // If the "carapace" binary does not exist at the determined path, set the path to an empty string.
-    if (not stdfs::exists(this->path_carapace_bin))
+    std::error_code ec;
+    if (not stdfs::exists(this->path_carapace_bin, ec) or ec)
         this->path_carapace_bin = Path("");
 
 }   // }}}
@@ -81,6 +123,9 @@ Generator<Tuple<StringView, StringView, const char*>> CarapaceService::complete(
     // Do nothing if no tokens are provided.
     if (tokens.size() < 2) co_return;
 
+    // Get the query prefix for the last token.
+    const StringView query_prefix = get_carapace_query_prefix(tokens.back());
+
     // Clean up the cache if the size of the cache exceeds the threshold.
     constexpr SizeType max_cache_entries = 256;
     if (this->cache.size() >= max_cache_entries)
@@ -88,15 +133,17 @@ Generator<Tuple<StringView, StringView, const char*>> CarapaceService::complete(
 
     // Prepare the command to run "carapace" with the given tokens.
     uint64_t hash_val = hash(tokens[0]);
-    for (SizeType idx = 1; idx < tokens.size(); ++idx)
+    for (SizeType idx = 1; idx < (tokens.size() - 1); ++idx)
         hash_val = hash(tokens[idx], hash("\xFF", hash_val));
+    hash_val = hash(query_prefix, hash("\xFF", hash_val));
 
     if (not this->cache.contains(hash_val))
     {
         // Prepare the command to run "carapace" with the given tokens:
-        //     args = ["path/to/carapace", tokens[0], "export", tokens[0], tokens[1], ...]
+        //     args = ["path/to/carapace", tokens[0], "export", tokens[0], tokens[1], ..., tokens[n-2], ""]
         Vector<StringView> args = {this->path_carapace_bin.c_str(), tokens.front(), "export"};
-        args.insert(args.end(), tokens.begin(), tokens.end());
+        args.insert(args.end(), tokens.begin(), tokens.end() - 1);
+        args.emplace_back(query_prefix);
 
         try
         {
@@ -138,6 +185,8 @@ Generator<Tuple<StringView, StringView, const char*>> CarapaceService::complete(
         // If an error occurs while parsing the JSON output, return without yielding any completion candidates.
         catch (const json::exception&)
         {
+            // Register an empty vector in the cache to avoid repeated parsing errors for the same input.
+            this->cache[hash_val] = {};
             co_return;
         }
     }
@@ -158,7 +207,7 @@ const char* CarapaceService::get_color(StringView style) const
     for (const StringView sv : split(style, " "))
         if (auto it = colors.find(sv); it != colors.end())
             return it->second.c_str();
-    return "";
+    return "\x1B[0m";
 
 }   // }}}
 

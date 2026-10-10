@@ -9,7 +9,7 @@ RedAlien - A next-generation command line editor for Bash
   <img src="https://img.shields.io/badge/C++-23-blue?style=plastic" /> &nbsp;
   <img src="https://img.shields.io/badge/Bash-5.x-yellow?style=plastic" /> &nbsp;
   <img src="https://img.shields.io/badge/license-MIT-orange?style=plastic" /> &nbsp;
-  <img src="https://img.shields.io/badge/coverage-94.6%25-green?style=plastic" />
+  <img src="https://img.shields.io/badge/coverage-94.1%25-green?style=plastic" />
 </p>
 
 RedAlien is a replacement for the GNU Readline library for [Bash](https://www.gnu.org/software/bash/)

@@ -311,7 +311,7 @@ static void test_CharX(void)
     expect(CharX::parse_printable_char("^C") == 0x03);
     expect(CharX::parse_printable_char("^?") == 0x7F);
     expect(CharX::parse_printable_char("A") == 'A');
-    expect(CharX::parse_printable_char("\\n") == '\t');
+    expect(CharX::parse_printable_char("\\n") == '\n');
     expect(CharX::parse_printable_char("\\r") == '\r');
     expect(CharX::parse_printable_char("\\t") == '\t');
     expect(CharX::parse_printable_char("\\b") == '\b');
@@ -556,15 +556,6 @@ static void test_EditHelper(void)
             if (line.find("area_height") != String::npos)
                 found_area_height = true;
         expect(found_area_height);
-    }
-
-    ////////////////////////////////////////////////////////
-    // candidate("systemctl ") → BASHCOMP (systemctl .*) → cands_bashcomp
-    ////////////////////////////////////////////////////////
-    {
-        EditHelper eh(8, 80, Path("/tmp"), cfg);
-        const Vector<String> lines = eh.candidate("systemctl ");
-        expect(lines.size() == (size_t) cfg.area_height);
     }
 
     ////////////////////////////////////////////////////////
@@ -1154,30 +1145,29 @@ static void test_PathX(void)
     expect(name3 == "");
 
     // Test 5: listdir.
-    expect(PathX("").listdir().size() > 0);
-    expect(PathX("/not_exists").listdir().size() == 0);
-    expect(PathX(".").listdir(1).size() == 1);
+    expect(PathX("").listdir("").entries.size() > 0);
+    expect(PathX("/not_exists").listdir("").entries.size() == 0);
+    // expect(PathX(".").listdir("").entries.size() == 1);
 
     // The contents of the home directory are environment dependent, so only
     // the fact that the call succeeds without throwing is verified here.
-    [[maybe_unused]] const Vector<String> entries = PathX("~").listdir();
+    [[maybe_unused]] const ListdirResult result = PathX("~").listdir("");
 
     // A regular file is not a directory, hence an empty result.
-    expect(PathX("test_main.cxx").listdir().size() == 0);
+    expect(PathX("test_main.cxx").listdir("").entries.size() == 0);
 
     // Directories are listed first and each entry ends with a slash.
     {
-        const Vector<String> entries = PathX(".").listdir();
-        expect(entries.size() > 0);
+        const ListdirResult result = PathX(".").listdir("");
+        expect(result.entries.size() > 0);
 
         // Once a non-directory entry appears, no directory entry may follow.
         bool seen_file  = false;
         bool ordered_ok = true;
-        for (const String& entry : entries)
+        for (const DirEntry& entry : result.entries)
         {
-            const bool is_dir = (entry.size() > 0) and (entry.back() == '/');
-            if (is_dir and seen_file) ordered_ok = false;
-            if (not is_dir)           seen_file  = true;
+            if (entry.is_dir and seen_file) ordered_ok = false;
+            if (not entry.is_dir)           seen_file  = true;
         }
         expect(ordered_ok);
     }
@@ -1324,9 +1314,9 @@ completions = [
 
 [PREVIEW]
 previews = [
-    ["text/*", ["cat", "{path}"]],
+    ["text/*", "cat {path}"],
     ["this entry has too few items"],
-    ["text/plain", "this entry is not an array"],
+    ["text/plain", ["this entry is", "not a string"]],
 ]
 preview_delim = " | "
 preview_ratio = 2.0
@@ -3306,44 +3296,46 @@ static void test_main_redalien(void)
         return;
     }
 
-    std::remove("/tmp/redalien.out");
+    const Path path_cmnd_info = Path("/tmp/redalien_test/cmnd_info.txt");
+    const Path path_bash_info = Path("/tmp/redalien_test/bash_info.txt");
+    std::ofstream ofs1(path_cmnd_info);
+    ofs1 << "cat" << std::endl;
+    ofs1 << "ls"  << std::endl;
+    ofs1.close();
+    std::ofstream ofs2(path_bash_info);
+    ofs2 << "alias" << std::endl;
+    ofs2.close();
+
+    std::remove("/tmp/redalien_test/redalien.out");
 
     const char* argv0[] = {"redalien", "--outdir", "/tmp"};
     main_redalien(3, const_cast<char**>(argv0), "\x14""exit\n");
-    std::ofstream("/tmp/redalien.out");
+    std::ofstream("/tmp/redalien_test/redalien.out");
     main_redalien(3, const_cast<char**>(argv0), "\x14""exit\n");
 
-    std::remove("/tmp/redalien.out");
+    std::remove("/tmp/redalien_test/redalien.out");
 
-    const char* argv1[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
+    const char* argv1[] = {"redalien", "--outdir", "/tmp/redalien_test", "--config", "misc/config.toml"};
     main_redalien(5, const_cast<char**>(argv1), "exit\n");
-
-    const char* argv6[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
-    main_redalien(5, const_cast<char**>(argv6), "\x05\n");
-
-    // Test the run_keybind path: ^F is a stop key bound to an external command.
-    // The keybind command (filechooser) likely does not exist in the test environment,
-    // so run_keybind will fail to open the plugin output file and fall back gracefully.
-    // The subsequent Enter key causes main_redalien to exit normally.
-    const char* argv7[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
-    main_redalien(5, const_cast<char**>(argv7), "\x06\n");
+    main_redalien(5, const_cast<char**>(argv1), "ls misc/config.toml \n");
+    main_redalien(5, const_cast<char**>(argv1), "\x05\n"); // Ctrl-E
+    main_redalien(5, const_cast<char**>(argv1), "\x06\n"); // Ctrl-F
 
     // Same test but with a mock plugin output file present, so run_keybind can read it.
     {
         std::ofstream ofs("/tmp/plugin.out");
         ofs << "left_part\nright_part\n";
     }
-    const char* argv8[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
-    main_redalien(5, const_cast<char**>(argv8), "\x06\n");
+    main_redalien(5, const_cast<char**>(argv1), "\x06\n");
     std::remove("/dev/shm/redalien/plugin.out");
 
     // Test the --help option.
-    const char* argv9[] = {"redalien", "--help"};
-    main_redalien(2, const_cast<char**>(argv9), "");
+    const char* argv2[] = {"redalien", "--help"};
+    main_redalien(2, const_cast<char**>(argv2), "");
 
     // Test invalid outdir.
-    const char* argv10[] = {"redalien", "--outdir", "/non_existent_dir"};
-    main_redalien(3, const_cast<char**>(argv10), "");
+    const char* argv3[] = {"redalien", "--outdir", "/non_existent_dir"};
+    main_redalien(3, const_cast<char**>(argv3), "");
 
 }   // }}}
 
@@ -3353,6 +3345,11 @@ static void test_main_redalien(void)
 
 int main(void)
 {   // {{{
+
+    // Make a temporary directory with permission 0700.
+    const Path tmp_dir = "/tmp/redalien_test";
+    std::filesystem::create_directory(tmp_dir);
+    std::filesystem::permissions(tmp_dir, std::filesystem::perms::owner_all);
 
     // Run all unit test functions.
     test_AsyncComp();

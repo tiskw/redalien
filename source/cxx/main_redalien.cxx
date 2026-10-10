@@ -45,7 +45,8 @@ namespace
     {   // {{{
 
         // Returns empty string if not a Git directory.
-        if (not stdfs::exists(".git"))
+        std::error_code ec;
+        if (not stdfs::exists(".git", ec) or ec)
             return "";
 
         // Get the branch name and its status at the same time.
@@ -76,11 +77,11 @@ namespace
         }
 
         // Colorize as yellow if the git status is "changed".
-        if (!branch.empty() and is_changed)
+        if (not branch.empty() and is_changed)
             return "\x1B[38;2;235;193;111m" + branch + "!\x1B[m";
 
         // Colorize as green if the git status is "unchanged".
-        if (!branch.empty())
+        if (not branch.empty())
             return "\x1B[38;2;181;189;104m" + branch +  "\x1B[m";
 
         return branch;
@@ -197,7 +198,7 @@ namespace
         const StringMap extra = {
             {"{lhs}",           rc_out.lhs},
             {"{rhs}",           rc_out.rhs},
-            {"{output_plugin}", expand_tilde(path_plugin_out.string())},
+            {"{output_plugin}", path_plugin_out.string()},
         };
 
         // Tokenize the command string with placeholder replacement.
@@ -205,6 +206,11 @@ namespace
         Vector<String> cmd_tokens;
         for (const String& token : tokenize_with_placeholder_replacement(plugin_trigger_keys.at(rc_out.stop), extra, TOKENIZE_DEQUOTE))
             cmd_tokens.emplace_back(token);
+
+        // Remove the command output file if it exists.
+        std::error_code ec;
+        if (stdfs::exists(path_plugin_out, ec))
+            stdfs::remove(path_plugin_out, ec);
 
         // Run the tokenized command.
         run_command(cmd_tokens);
@@ -284,7 +290,7 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     // specified or invalid, print an error message and exit. Note that we include a brief sleep
     // at the end. This is because this program is designed to be called repeatedly, and the pause
     // prevents the CPU from becoming overburdened by rapid, repetitive execution.
-    const Path outdir = args.count("outdir") ? Path(args["outdir"].as<String>()) : Path("");
+    const Path outdir = args.count("outdir") ? Path(expand_tilde(args["outdir"].as<String>())) : Path("");
     if (not is_valid_outdir(outdir))
     {
         print_error("Error", "The mandatory option --outdir is not provided or invalid.");

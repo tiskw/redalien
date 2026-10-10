@@ -108,7 +108,7 @@ namespace
     // Convert a TOML array node to a map of string and string.
     //
     // [Args]
-    //   array_node (const toml::array*): [IN] Pointer to the TOML array node.
+    //   node (const toml::node_view<const toml::node>): [IN] View of the TOML array node.
     //
     // [Returns]
     //   (StringMap): Map of string and string.
@@ -146,7 +146,7 @@ namespace
     // Convert a TOML array node to a vector of Completion objects.
     //
     // [Args]
-    //   array_node (const toml::array*): [IN] Pointer to the TOML array node.
+    //   node (const toml::node_view<const toml::node>): [IN] View of the TOML array node.
     //
     // [Returns]
     //   (Vector<Completion>): Vector of Completion objects.
@@ -155,6 +155,9 @@ namespace
 
         // Initialize the result vector.
         Vector<Completion> result;
+
+        // If the given array node is invalid, show error message and return the empty map.
+        if (not node.is_array()) return result;
 
         for (SizeType idx = 0; idx < node.as_array()->size(); ++idx)
         {

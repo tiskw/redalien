@@ -25,6 +25,17 @@
 // Unnamed namespace for making classes and functions file-local.
 namespace
 {
+    using RegEx = std::regex;
+
+    std::shared_future<Vector<String>> shared_future_cache_commands;
+    // Shared future instance of the command cache.
+
+    std::shared_future<Vector<Vector<RegEx>>> shared_future_vec_patterns_regex;
+    // Cache of compiled regular expression patterns for completion matching.
+
+    std::once_flag flag_init_shared_futures;
+    // A flag for one-time initialization of shared future instances.
+
     Vector<String> columnize(const Vector<StringView>& texts, Size area_size, uint16_t padding)
     // Columnize the given string vector.
     //
@@ -325,31 +336,23 @@ namespace
 
     }   // }}}
 
-    const char* get_color(StringView name, const Path& path)
-    // Get color code based on the file type.
+    const char* get_color(const DirEntry& entry) noexcept
+    // Get color code based on the file type. No file system access is performed here,
+    // because the file type is already resolved by PathX::listdir.
     //
     // [Args]
-    //   path (const Path&): [IN] File path for checking the file type.
+    //   entry (const DirEntry&): [IN] Directory entry.
     //
     // [Returns]
     //   (const char*): Color code for the file type.
     //
     {   // {{{
 
-        // Case 1: Directory.
-        if ((name.size() > 0) and (name.back() == '/'))
-            return "\x1B[94m";
+        if (entry.is_dir)  return "\x1B[94m";  // Directory.
+        if (entry.is_exec) return "\x1B[92m";  // Executable file.
+        return "\x1B[0m";                      // Others.
 
-        // Case 2: executable file.
-        std::error_code ec;
-        const stdfs::file_status status = stdfs::status(path, ec);
-        if ((not ec) and ((status.permissions() & stdfs::perms::owner_exec) != stdfs::perms::none))
-            return "\x1B[92m";
-
-        // Otherwise, return default color code.
-        return "\x1B[0m";
-
-    };  // }}}
+    }   // }}}
 
     String colorize_name(StringView name, const String& query_key, const char* color_code)
     // Colorize the file name based on the file type and the user input query key.
@@ -369,10 +372,9 @@ namespace
             return std::format("{}{}\x1B[0m", color_code, name);
 
         // Colorize the matched query key.
-        String result = std::format("\x1B[35m{}\x1B[0m", name);
-        result.insert(query_key.size() + 5, color_code);
-
-        return result;
+        const StringView sv1 = name.substr(0, query_key.size());
+        const StringView sv2 = name.substr(query_key.size());
+        return std::format("\x1B[35m{}\x1B[0m{}{}\x1B[0m", sv1, color_code, sv2);
 
     };  // }}}
 }
@@ -388,7 +390,7 @@ EditHelper::EditHelper(uint16_t rows, uint16_t cols, const Path& outdir, const R
 {   // {{{
 
     // Initialize shared future instances for caching command names and compiled regular expression patterns.
-    std::call_once(this->flag_init_shared_futures, &EditHelper::init_shared_futures, outdir, cfg);
+    std::call_once(flag_init_shared_futures, &EditHelper::init_shared_futures, outdir, cfg);
 
 }   // }}}
 
@@ -424,7 +426,7 @@ const Vector<String>& EditHelper::candidate(StringView lhs)
         tokens.push_back(StringView(""));
 
     // Get completion type and its optional string.
-    const auto& [comp_type, option] = get_target(tokens, this->completions, this->shared_future_vec_patterns_regex.get());
+    const auto& [comp_type, option] = get_target(tokens, this->completions, shared_future_vec_patterns_regex.get());
 
     // Select the instance of cands and lines.
     if (comp_type == CompType::NONE)
@@ -591,7 +593,7 @@ void EditHelper::cands_command(const Vector<StringView>& tokens, const String& o
 
     // Prepare command cache.
     if (this->cache_commands.size() == 0)
-        for (const String& cmd : this->shared_future_cache_commands.get())
+        for (const String& cmd : shared_future_cache_commands.get())
             this->cache_commands.emplace_back(cmd);
 
     // Filter matched command names.
@@ -627,28 +629,17 @@ void EditHelper::cands_filepath(const Vector<StringView>& tokens)
     //   * query string for filtering seach result.
     const auto [query_dir, query_key] = split_to_target_and_query(tokens);
 
-    // Show dot file if current file name started with dot.
-    const bool show_dot = (query_key.size() > 0) and (query_key[0] == '.');
+    // List the matched entries. The prefix filtering, the hidden file filtering,
+    // and the time limit are all handled inside PathX::listdir.
+    const ListdirResult listing = query_dir.listdir(query_key);
 
-    // Search the directory and filter out unnecessary search results.
-    for (const String& name : query_dir.listdir())
+    for (const DirEntry& entry : listing.entries)
     {
-        // Skip dot files if the query key is not a dot file.
-        if ((not show_dot) and (name[0] == '.'))
-            continue;
+        // Compute path of the target file.
+        const Path path = query_dir / entry.name;
 
-        // If match with the user input.
-        if (name.starts_with(query_key))
-        {
-            // Compute path of the target file.
-            Path path = query_dir / name;
-
-            // Get the colorised name as a description of the completion.
-            String desc = colorize_name(name, query_key, get_color(name, path));
-
-            // Append query string and display string.
-            this->cands->emplace_back(String(path.c_str()), String(desc));
-        }
+        // Append query string and colorized display string.
+        this->cands->emplace_back(path.string(), colorize_name(entry.name, query_key, get_color(entry)));
     }
 
 }   // }}}
@@ -831,18 +822,5 @@ void EditHelper::init_shared_futures(const Path& outdir, const RedAlienConfig& c
     shared_future_vec_patterns_regex = launch_async(compile_regex_patterns, cfg.completions).share();
 
 };  // }}}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// EditHelper: Static member variables
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-std::shared_future<Vector<String>> EditHelper::shared_future_cache_commands;
-// Shared future instance of the command cache.
-
-std::shared_future<Vector<Vector<RegEx>>> EditHelper::shared_future_vec_patterns_regex;
-// Cache of compiled regular expression patterns for completion matching.
-
-std::once_flag EditHelper::flag_init_shared_futures;
-// A flag for one-time initialization of shared future instances.
 
 // vim: expandtab tabstop=4 shiftwidth=4 fdm=marker

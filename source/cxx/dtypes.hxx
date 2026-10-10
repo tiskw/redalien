@@ -13,7 +13,6 @@
 #include <filesystem>
 #include <generator>
 #include <optional>
-#include <regex>
 #include <set>
 #include <string>
 #include <tuple>
@@ -94,9 +93,6 @@ using Path = stdfs::path;
 
 // Pointer difference type.
 using PtrDiff = std::ptrdiff_t;
-
-// Regular expression class.
-using RegEx = std::regex;
 
 // Signed size type.
 using SignedSizeType = ssize_t;

@@ -85,6 +85,12 @@ class TextEditor
         // Getter and setter functions
         ////////////////////////////////////////////////////////////////////////////////////////////
 
+        bool empty(void) const noexcept;
+        // Check if the current text buffer is empty.
+        //
+        // [Returns]
+        //   (bool): True if the current text buffer is empty, false otherwise.
+
         StringView get_lhs(void) const;
         StringView get_rhs(void) const;
         // Get left/right hand side of the text buffer.
