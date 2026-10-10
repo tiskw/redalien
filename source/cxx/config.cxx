@@ -27,7 +27,7 @@
 namespace
 {
     void show_error_msg_undefined_entry(const toml::key& section, const toml::key& value)
-    // Show error message and quit this software.
+    // Show error message and continue this software.
     //
     // [Args]
     //   section (const toml::key&): [IN] Section name.
@@ -44,8 +44,8 @@ namespace
 
     }   // }}}
 
-    void show_error_msg_invalid_completion_entry(const toml::node& entry)
-    // Show error message and quit this software.
+    void show_error_msg_invalid_entry(const toml::node_view<const toml::node> entry, const char* prefix)
+    // Show error message and continue this software.
     //
     // [Args]
     //   entry (const toml::node&): [IN] TOML entry.
@@ -54,23 +54,162 @@ namespace
 
         // Prepare error message.
         std::stringstream ss;
-        ss << "Invalid completion entry: " << entry.as_array();
+        ss << prefix << entry.as_array();
 
         // Print error message and exit the function.
         print_error("Error", ss.str());
 
     }   // }}}
 
-    Vector<String> as_string_vector(const toml::array* array_node)
+    void show_warn_msg_invalid_ctype(const StringView completion_type)
+    // Show warning message and continue this software.
+    //
+    // [Args]
+    //   completion_type (const StringView): [IN] Completion type string.
+    //
+    {   // {{{
+
+        // Prepare warning message.
+        std::stringstream ss;
+        ss << "Invalid completion type: " << completion_type << ". ";
+        ss << "It must be one of 'carapace', 'command', 'grep', 'path', 'preview', or 'shell'. ";
+        ss << "Falling back to 'path' completion type.";
+
+        // Print warning message and continue the function.
+        print_error("Warning", ss.str());
+
+    }   // }}}
+
+    Vector<String> parse_node_as_string_vector(const toml::array* array_node)
     // Convert a TOML array node to a vector of strings.
+    //
+    // [Args]
+    //   array_node (const toml::array*): [IN] Pointer to the TOML array node.
+    //
+    // [Returns]
+    //   (Vector<String>): Vector of strings.
     //
     {   // {{{
 
         Vector<String> result;
 
+        // If the given array node is invalid, return the empty vector.
+        if (not array_node->is_array()) return result;
+
         // Read pattern strings.
         std::transform(array_node->begin(), array_node->end(), std::back_inserter(result),
                        [](const toml::node& value) { return value.value_or(""); });
+
+        return result;
+
+    }   // }}}
+
+    StringMap parse_node_as_string_map(const toml::node_view<const toml::node> node)
+    // Convert a TOML array node to a map of string and string.
+    //
+    // [Args]
+    //   node (const toml::node_view<const toml::node>): [IN] View of the TOML array node.
+    //
+    // [Returns]
+    //   (StringMap): Map of string and string.
+    //
+    {   // {{{
+
+        // Initialize the result map.
+        StringMap result;
+
+        // If the given array node is invalid, show error message and return the empty map.
+        if (not node.is_array()) return result;
+
+        for (SizeType idx = 0; idx < node.as_array()->size(); ++idx)
+        {
+            // Get the view of the entry node.
+            const toml::node_view<const toml::node> entry = node[idx];
+
+            // Check if the entry is an array and has exactly 2 items (key and values).
+            if ((not entry.is_array()) or (entry.as_array()->size() != 2))
+            { show_error_msg_invalid_entry(entry, "Invalid entry: "); continue; }
+
+            // Check if the first item is a string (key) and the second item is a string (value).
+            if ((not entry.as_array()->at(0).is_string()) or (not entry.as_array()->at(1).is_string()))
+            { show_error_msg_invalid_entry(entry, "Invalid entry: "); continue; }
+
+            // Register the key and value to the result map.
+            result.emplace(entry.as_array()->at(0).value_or(""), entry.as_array()->at(1).value_or(""));
+        }
+
+        return result;
+
+    }   // }}}
+
+    Vector<Completion> parse_node_as_completion_vector(const toml::node_view<const toml::node> node)
+    // Convert a TOML array node to a vector of Completion objects.
+    //
+    // [Args]
+    //   node (const toml::node_view<const toml::node>): [IN] View of the TOML array node.
+    //
+    // [Returns]
+    //   (Vector<Completion>): Vector of Completion objects.
+    //
+    {   // {{{
+
+        // Initialize the result vector.
+        Vector<Completion> result;
+
+        // If the given array node is invalid, show error message and return the empty map.
+        if (not node.is_array()) return result;
+
+        for (SizeType idx = 0; idx < node.as_array()->size(); ++idx)
+        {
+            // Get the view of the entry node.
+            const toml::node_view<const toml::node> entry = node[idx];
+
+            // Show an error message and skip the entry if it is not an array or does not have exactly 3 items
+            // (completion pattern, completion type, and optional string).
+            if ((not entry.is_array()) or (entry.as_array()->size() != 3))
+            { show_error_msg_invalid_entry(entry, "Invalid completion entry: "); continue; }
+
+            // Show an error message and skip the entry if the first item is not an array (completion pattern),
+            // the second item is not a string (completion type), or the third item is not a string (optional string).
+            if ( (not entry.as_array()->at(0).is_array()  )
+              or (not entry.as_array()->at(1).is_string() )
+              or (not entry.as_array()->at(2).is_string() ))
+            { show_error_msg_invalid_entry(entry, "Invalid completion entry: "); continue; }
+
+            ////////////////////////////////////////////////////////////////////////////////////
+            // Read completion pattern
+            ////////////////////////////////////////////////////////////////////////////////////
+
+            // Read pattern strings.
+            Vector<String> pattern = parse_node_as_string_vector(entry.as_array()->at(0).as_array());
+
+            ////////////////////////////////////////////////////////////////////////////////////
+            // Read completion type
+            ////////////////////////////////////////////////////////////////////////////////////
+
+            // Get the node of the completion type.
+            const char* ctype_strptr = entry.as_array()->at(1).value_or("");
+
+            // Compute completion type.
+            CompType ctype;
+            if      (strcmp(ctype_strptr, "carapace") == 0) { ctype = CompType::CARAPACE; }
+            else if (strcmp(ctype_strptr, "command")  == 0) { ctype = CompType::COMMAND;  }
+            else if (strcmp(ctype_strptr, "grep")     == 0) { ctype = CompType::GREP;     }
+            else if (strcmp(ctype_strptr, "path")     == 0) { ctype = CompType::PATH;     }
+            else if (strcmp(ctype_strptr, "preview")  == 0) { ctype = CompType::PREVIEW;  }
+            else if (strcmp(ctype_strptr, "shell")    == 0) { ctype = CompType::SHELL;    }
+            else { show_warn_msg_invalid_ctype(ctype_strptr); ctype = CompType::PATH;     }
+
+            ////////////////////////////////////////////////////////////////////////////////////
+            // Read optional string
+            ////////////////////////////////////////////////////////////////////////////////////
+
+            // Get the node of the optional string.
+            const char* opt_strptr = entry.as_array()->at(2).value_or("");
+
+            // Register the triplet of completion pattern, completion type, and optional string.
+            result.emplace_back(pattern, ctype, opt_strptr);
+        }
 
         return result;
 
@@ -88,7 +227,7 @@ namespace
     {   // {{{
 
         // Get target config item.
-        toml::node_view node = table[section][value];
+        toml::node_view<const toml::node> node = table[section][value];
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Read the [GENERAL] section.
@@ -102,126 +241,44 @@ namespace
         else if ((section == "GENERAL") and (value == "datetime_post" )) cfg.datetime_post  = node.value_or(cfg.datetime_post);
         else if ((section == "GENERAL") and (value == "histhint_pre"  )) cfg.histhint_pre   = node.value_or(cfg.histhint_pre);
         else if ((section == "GENERAL") and (value == "histhint_post" )) cfg.histhint_post  = node.value_or(cfg.histhint_post);
-        else if ((section == "GENERAL") and (value == "hline_char"    )) cfg.hline_char     = node.value_or(cfg.hline_char);
-        else if ((section == "GENERAL") and (value == "hline_color"   )) cfg.hline_color    = node.value_or(cfg.hline_color);
-        else if ((section == "GENERAL")                                ) show_error_msg_undefined_entry(section, value);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Read the [PROMPT] section.
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        else if ((section == "PROMPT") and (value == "ps0l")) cfg.ps0l = node.value_or(cfg.ps0l);
-        else if ((section == "PROMPT") and (value == "ps0r")) cfg.ps0r = node.value_or(cfg.ps0r);
-        else if ((section == "PROMPT") and (value == "ps1i")) cfg.ps1i = node.value_or(cfg.ps1i);
-        else if ((section == "PROMPT") and (value == "ps1n")) cfg.ps1n = node.value_or(cfg.ps1n);
-        else if ((section == "PROMPT") and (value == "ps2" )) cfg.ps2  = node.value_or(cfg.ps2);
-        else if ((section == "PROMPT")                      ) show_error_msg_undefined_entry(section, value);
+        else if ((section == "PROMPT") and (value == "ps1i" )) cfg.ps1i  = node.value_or(cfg.ps1i);
+        else if ((section == "PROMPT") and (value == "ps1n" )) cfg.ps1n  = node.value_or(cfg.ps1n);
+        else if ((section == "PROMPT") and (value == "ps2"  )) cfg.ps2   = node.value_or(cfg.ps2);
+        else if ((section == "PROMPT") and (value == "ps_ex")) cfg.ps_ex = node.value_or(cfg.ps_ex);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Read the [KEYBIND] section.
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        else if (section == "KEYBIND")
-        {
-            cfg.keybinds[String(value.str())] = node.value_or("");
-        }
+        else if ((section == "KEYBIND") and (value == "candidate_completion_key")) cfg.cand_comp_key       = node.value_or(cfg.cand_comp_key);
+        else if ((section == "KEYBIND") and (value == "history_completion_key"  )) cfg.hist_comp_key       = node.value_or(cfg.hist_comp_key);
+        else if ((section == "KEYBIND") and (value == "plugin_trigger_keys"     )) cfg.plugin_trigger_keys = parse_node_as_string_map(node);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Read the [COMPLETION] section.
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        else if ((section == "COMPLETION") and (value == "completions") and (node.is_array()))
-        {
-            // Clear the default completions.
-            cfg.completions.clear();
-
-            for (const auto& entry : *node.as_array())
-            {
-                // Check if the entry is an array and has at least 2 items (completion pattern and completion type).
-                if ((not entry.is_array()) or (entry.as_array()->size() < 3)
-                 or (not entry.as_array()->at(0).is_array()) or (not entry.as_array()->at(1).is_string()) or (not entry.as_array()->at(2).is_string()))
-                {
-                    show_error_msg_invalid_completion_entry(entry);
-                    continue;
-                }
-
-                ////////////////////////////////////////////////////////////////////////////////////
-                // Read completion pattern
-                ////////////////////////////////////////////////////////////////////////////////////
-
-                // Read pattern strings.
-                Vector<String> pattern = as_string_vector(entry.as_array()->at(0).as_array());
-
-                ////////////////////////////////////////////////////////////////////////////////////
-                // Read completion type
-                ////////////////////////////////////////////////////////////////////////////////////
-
-                // Get the node of the completion type.
-                const char* ctype_strptr = entry.as_array()->at(1).value_or("");
-
-                // Compute completion type.
-                CompType ctype;
-                if      (strcmp(ctype_strptr, "bashcomp")        == 0) ctype = CompType::BASHCOMP;
-                else if (strcmp(ctype_strptr, "carapace")        == 0) ctype = CompType::CARAPACE;
-                else if (strcmp(ctype_strptr, "command")         == 0) ctype = CompType::COMMAND;
-                else if (strcmp(ctype_strptr, "grep")            == 0) ctype = CompType::GREP;
-                else if (strcmp(ctype_strptr, "option")          == 0) ctype = CompType::OPTION;
-                else if (strcmp(ctype_strptr, "path")            == 0) ctype = CompType::PATH;
-                else if (strcmp(ctype_strptr, "preview")         == 0) ctype = CompType::PREVIEW;
-                else if (strcmp(ctype_strptr, "shell")           == 0) ctype = CompType::SHELL;
-                else if (strcmp(ctype_strptr, "subcmd")          == 0) ctype = CompType::SUBCMD;
-                else if (strcmp(ctype_strptr, "subcmd+bashcomp") == 0) ctype = CompType::SC_AND_BC;
-                else                                                   ctype = CompType::PATH;
-
-                ////////////////////////////////////////////////////////////////////////////////////
-                // Read optional string
-                ////////////////////////////////////////////////////////////////////////////////////
-
-                // Get the node of the optional string.
-                const char* opt_strptr = entry.as_array()->at(2).value_or("");
-
-                // Register the triplet of completion pattern, completion type, and optional string.
-                cfg.completions.emplace_back(pattern, ctype, String(opt_strptr));
-            }
-        }
-        else if (section == "COMPLETION") show_error_msg_undefined_entry(section, value);
+        else if ((section == "COMPLETION") and (value == "completions")) cfg.completions = parse_node_as_completion_vector(node);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Read the [PREVIEW] section.
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        else if ((section == "PREVIEW") and (value == "previews") and (node.is_array()))
-        {
-            // Clear the default previews.
-            cfg.previews.clear();
-
-            for (const auto& entry : *node.as_array())
-            {
-                if ((not entry.is_array()) or (entry.as_array()->size() < 2)
-                 or (not entry.as_array()->at(0).is_string()) or (not entry.as_array()->at(1).is_array()))
-                {
-                    show_error_msg_invalid_completion_entry(entry);
-                    continue;
-                }
-
-                // Read the pattern string and command arguments.
-                const char* pattern_strptr  = entry.as_array()->at(0).value_or("");
-                Vector<String> command_args = as_string_vector(entry.as_array()->at(1).as_array());
-
-                // Register the pattern string and command arguments to the previews map.
-                cfg.previews.emplace(pattern_strptr, command_args);
-            }
-        }
+        else if ((section == "PREVIEW") and (value == "previews")     ) cfg.previews      = parse_node_as_string_map(node);
         else if ((section == "PREVIEW") and (value == "preview_delim")) cfg.preview_delim = node.value_or(cfg.preview_delim);
         else if ((section == "PREVIEW") and (value == "preview_ratio")) cfg.preview_ratio = node.value_or(cfg.preview_ratio);
-        else if ((section == "PREVIEW")                               ) show_error_msg_undefined_entry(section, value);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Config values for plugins
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        else if (StringView(section).starts_with("PLUGIN_"))
-            /* The section "PLUGIN_*" will be used for plugins, so ignore in redalien. */ ;
+        // The section "PLUGIN_*" will be used for plugins, so ignore in RedAlien.
+        else if (StringView(section).starts_with("PLUGIN_")) { /* Do nothing */ }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Otherwise, show error message and exit.

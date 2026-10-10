@@ -7,13 +7,12 @@
 #ifndef DTYPES_HXX
 #define DTYPES_HXX
 
-// Include the headers of STL.
+// Include STL headers.
 #include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <generator>
 #include <optional>
-#include <regex>
 #include <set>
 #include <string>
 #include <tuple>
@@ -42,17 +41,13 @@ struct Size
 enum class CompType
 // Data type for completion type.
 {
-    NONE      =  0,
-    BASHCOMP  =  1,
-    CARAPACE  =  2,
-    COMMAND   =  3,
-    GREP      =  4,
-    OPTION    =  5,
-    PATH      =  6,
-    PREVIEW   =  7,
-    SHELL     =  8,
-    SUBCMD    =  9,
-    SC_AND_BC = 10,
+    NONE     = 0,
+    CARAPACE = 1,
+    COMMAND  = 2,
+    GREP     = 3,
+    PATH     = 4,
+    PREVIEW  = 5,
+    SHELL    = 6,
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -98,9 +93,6 @@ using Path = stdfs::path;
 
 // Pointer difference type.
 using PtrDiff = std::ptrdiff_t;
-
-// Regular expression class.
-using RegEx = std::regex;
 
 // Signed size type.
 using SignedSizeType = ssize_t;

@@ -67,12 +67,21 @@ AsyncComp::~AsyncComp(void)
 String AsyncComp::complete_sync(StringView lhs)
 {   // {{{
 
-    // The call of candidate() and complete() is wrapped in a lock to ensure that they run
-    // as one atomic unit.
+    // The call of candidate() and complete() is wrapped in a lock
+    // to ensure that they run as one atomic unit.
     std::lock_guard<std::mutex> lock(this->mtx_helper);
 
-    this->helper.candidate(lhs);
-    return this->helper.complete(lhs);
+    try
+    {
+        this->helper.candidate(lhs);
+        return this->helper.complete(lhs);
+    }
+    catch (const std::exception& e)
+    {
+        // If an exception occurs during completion, log the error and continue.
+        print_error("Error", std::format("Completion failed: {}", e.what()));
+        return String(lhs);
+    }
 
 }   // }}}
 

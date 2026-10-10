@@ -25,6 +25,41 @@
 // Unnamed namespace for making classes and functions file-local.
 namespace
 {
+    using RegEx = std::regex;
+
+    std::shared_future<Vector<String>> shared_future_cache_commands;
+    // Shared future instance of the command cache.
+
+    std::shared_future<Vector<Vector<RegEx>>> shared_future_vec_patterns_regex;
+    // Cache of compiled regular expression patterns for completion matching.
+
+    std::once_flag flag_init_shared_futures;
+    // A flag for one-time initialization of shared future instances.
+
+    String colorize_name(StringView name, const String& query_key, const char* color_code)
+    // Colorize the file name based on the file type and the user input query key.
+    //
+    // [Args]
+    //   name       (const String&): [IN] File name to be colorized.
+    //   query_key  (const String&): [IN] User input query key for colorization.
+    //   color_code (const char*)  : [IN] Color code for the file type.
+    //
+    // [Returns]
+    //   (String): Colorized file name for display.
+    //
+    {   // {{{
+
+        // Returns without query colorization if the query key is empty or the query key is invalid.
+        if (query_key.empty() or name.size() < query_key.size())
+            return std::format("{}{}\x1B[0m", color_code, name);
+
+        // Colorize the matched query key.
+        const StringView sv1 = name.substr(0, query_key.size());
+        const StringView sv2 = name.substr(query_key.size());
+        return std::format("\x1B[35m{}\x1B[0m{}{}\x1B[0m", sv1, color_code, sv2);
+
+    }   // }}}
+
     Vector<String> columnize(const Vector<StringView>& texts, Size area_size, uint16_t padding)
     // Columnize the given string vector.
     //
@@ -231,48 +266,6 @@ namespace
 
     }   // }}}
 
-    Generator<String> get_options_from_help(const String& command)
-    // Get help message of the specified command, parse it, and get option info.
-    //
-    // [Args]
-    //   command (const String&): [IN] Command string.
-    //
-    // [Returns]
-    //   (Generator<String>): List of short and long options.
-    //
-    // [Notes]
-    //   The data type of the argument "command" should be "const String" instead of "const String&",
-    //   because this function is a generator and its lifetime may be longer than the usual function.
-    //   If the argument is "const String&", the reference can be invalid when the last "co_yield" is executed.
-    //
-    {   // {{{
-
-        // Initialize the output set.
-        OrderedSet<String> output_s;
-        OrderedSet<String> output_l;
-
-        // Get the help message of the target command.
-        const String help = run_command(std::format("timeout 0.1s {} --help", command), RUN_COMMAND_GETOUT);
-
-        // Define a pattern to detect options.
-        const std::regex re(R"((--[\w-]+|-\w)(\[=[\w-]+\])?(=[\w-]+)?[^\w-])");
-
-        for (std::sregex_iterator it(help.begin(), help.end(), re), end; it != end; ++it)
-        {
-            // Get the option string.
-            const String opt = it->str(1) + it->str(2) + it->str(3);
-
-            // Store the option to the set.
-            if (opt.starts_with("--")) { output_l.insert(opt); }
-            else                       { output_s.insert(opt); }
-        }
-
-        // Yields the options in the order of short and long options.
-        for (const String& opt : output_s) { co_yield opt; }
-        for (const String& opt : output_l) { co_yield opt; }
-
-    }   // }}}
-
     bool match(const Vector<String>& patterns, const Vector<StringView>& tokens, const Vector<std::regex>& patterns_regex)
     // Return True if the given tokens matched with the given patterns.
     // The arguments `tokens` is a list of strings, and the argument `patterns`
@@ -367,59 +360,44 @@ namespace
 
     }   // }}}
 
-    const char* get_color(const String& name, const Path& path)
-    // Get color code based on the file type.
+    const char* get_color(const DirEntry& entry) noexcept
+    // Get color code based on the file type. No file system access is performed here,
+    // because the file type is already resolved by PathX::listdir.
     //
     // [Args]
-    //   path (const Path&): [IN] File path for checking the file type.
+    //   entry (const DirEntry&): [IN] Directory entry.
     //
     // [Returns]
     //   (const char*): Color code for the file type.
     //
     {   // {{{
 
-        // Case 1: Directory.
-        if ((name.size() > 0) and (name.back() == '/'))
-            return "\x1B[94m";
+        if (entry.is_dir)  return "\x1B[94m";  // Directory.
+        if (entry.is_exec) return "\x1B[92m";  // Executable file.
+        return "\x1B[0m";                      // Others.
 
-        // Case 2: executable file.
-        std::error_code ec;
-        const stdfs::file_status status = stdfs::status(path, ec);
-        if ((not ec) and ((status.permissions() & stdfs::perms::owner_exec) != stdfs::perms::none))
-            return "\x1B[92m";
+    }   // }}}
 
-        // Otherwise, return default color code.
-        return "\x1B[0m";
-
-    };  // }}}
-
-    String colorize_name(const String& name, const Path& path, const String& query_key)
-    // Colorize the file name based on the file type and the user input query key.
+    void init_shared_futures(const Path& outdir, const RedAlienConfig& cfg)
+    // Initialize shared future instances for caching command names and compiled regular expression patterns.
     //
     // [Args]
-    //   name      (const String&): [IN] File name to be colorized.
-    //   path      (const Path&  ): [IN] File path for checking the file type.
-    //   query_key (const String&): [IN] User input query key for colorization.
-    //
-    // [Returns]
-    //   (String): Colorized file name for display.
+    //   outdir (const Path&)          : [IN] Path to output directory.
+    //   cfg    (const RedAlienConfig&): [IN] Config data for initializing the shared futures.
     //
     {   // {{{
 
-        // Initialize the color code.
-        const char* color_code = get_color(name, path);
+        // Get the paths of the command info and bash info files.
+        const Path path_cmnd_info = outdir / "cmnd_info.txt";
+        const Path path_bash_info = outdir / "bash_info.txt";
 
-        // Returns withour query colorization if the query key is empty or the query key is invalid.
-        if (query_key.empty() or name.size() < query_key.size())
-            return color_code + name + "\x1B[0m";
+        // Create the cache of available command names.
+        shared_future_cache_commands = launch_async(get_available_commands, path_cmnd_info, path_bash_info).share();
 
-        // Colorize the matched query key.
-        String result = "\x1B[35m" + name + "\x1B[0m";
-        result.insert(query_key.size() + 5, color_code);
+        // Create the cache of compiled regular expression patterns for completion matching.
+        shared_future_vec_patterns_regex = launch_async(compile_regex_patterns, cfg.completions).share();
 
-        return result;
-
-    };  // }}}
+    }   // }}}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -427,12 +405,13 @@ namespace
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 EditHelper::EditHelper(uint16_t rows, uint16_t cols, const Path& outdir, const RedAlienConfig& cfg)
-    : area_size(cols, rows), column_padding(cfg.column_padding), completions(cfg.completions),
-      previews(cfg.previews), preview_delim(cfg.preview_delim), preview_ratio(cfg.preview_ratio)
+    : area_size(cols, rows), carapace_service(cfg), column_padding(cfg.column_padding),
+      completions(cfg.completions), previews(cfg.previews), preview_delim(cfg.preview_delim),
+      preview_ratio(cfg.preview_ratio)
 {   // {{{
 
     // Initialize shared future instances for caching command names and compiled regular expression patterns.
-    std::call_once(this->flag_init_shared_futures, &EditHelper::init_shared_futures, outdir, cfg);
+    std::call_once(flag_init_shared_futures, &init_shared_futures, outdir, cfg);
 
 }   // }}}
 
@@ -454,9 +433,8 @@ const Vector<String>& EditHelper::candidate(StringView lhs)
     // Clear the caches if the number of cache entries exceeds the maximum limit.
     // This process must be done before the entry is allocated, because clear() invalidates all pointers in the map.
     constexpr SizeType max_cache_entries = 256;
-    if (this->cache_cands_lhs.size() >= max_cache_entries) { this->cache_cands_lhs.clear(); }
-    if (this->cache_opt.size()       >= max_cache_entries) { this->cache_opt.clear();       }
-    if (this->cache_subcmd.size()    >= max_cache_entries) { this->cache_subcmd.clear();    }
+    if (this->cache_cands_lhs.size() >= max_cache_entries)
+        this->cache_cands_lhs.clear();
 
     // Split the given text (left hand side of the cursor) to tokens.
     // Drop white-space tokens and convert String to String.
@@ -464,12 +442,16 @@ const Vector<String>& EditHelper::candidate(StringView lhs)
     for (const StringView token : tokenize(lhs, TOKENIZE_PLAIN))
         tokens.emplace_back(token);
 
-    // Add empty token if the editing line ends with white-space.
-    if (lhs.size() > 0 and lhs.back() == ' ')
+    // Add empty token if the editing line ends with white-space (except inside an open quote).
+    if ((lhs.size() > 0) and (lhs.back() == ' ') and (tokens.empty() or not is_open_quote(tokens.back())))
         tokens.push_back(StringView(""));
 
+    // Strip the quotes of the last token, because candidates are computed from the raw string.
+    if (not tokens.empty())
+        tokens.back() = unquote(tokens.back());
+
     // Get completion type and its optional string.
-    const auto& [comp_type, option] = get_target(tokens, this->completions, this->shared_future_vec_patterns_regex.get());
+    const auto& [comp_type, option] = get_target(tokens, this->completions, shared_future_vec_patterns_regex.get());
 
     // Select the instance of cands and lines.
     if (comp_type == CompType::NONE)
@@ -484,23 +466,29 @@ const Vector<String>& EditHelper::candidate(StringView lhs)
         CandCacheEntry& entry = this->cache_cands_lhs[String(lhs)];
         this->cands = &entry.cands;
         this->lines = &entry.lines;
+
+        // NOTE: This implementation may create an empty cache entry if an error occurs during the
+        // completion process. Once such an entry is created, the completion process is not retried.
+        // However, the author believes the current approach is appropriate for the following reasons:
+        //   - We could avoid creating an empty cache entry by first storing the completion results in
+        //     a local variable and then adding them to the cache. However, we have observed that this
+        //     change introduces additional latency into the completion process and negatively affects
+        //     the responsiveness of completion display on the initial keystroke.
+        //   - The impact of an empty cache entry is limited to the lifetime of the "redalien" process
+        //     and is short-lived. It does not persist for the duration of the entire Bash session.
     }
 
     // Compute completion candidates that will be displayed to users.
     this->cands->clear();
     switch (comp_type)
     {
-        case CompType::BASHCOMP : this->cands_bashcomp (lhs, tokens);         break;
-        case CompType::CARAPACE : this->cands_carapace (tokens);              break;
-        case CompType::COMMAND  : this->cands_command  (tokens, option);      break;
-        case CompType::GREP     : this->cands_grep     (tokens, option);      break;
-        case CompType::OPTION   : this->cands_option   (tokens);              break;
-        case CompType::PATH     : this->cands_filepath (tokens);              break;
-        case CompType::PREVIEW  : this->cands_filepath (tokens);              break;
-        case CompType::SHELL    : this->cands_shell    (tokens, option);      break;
-        case CompType::SUBCMD   : this->cands_subcmd   (tokens, option);      break;
-        case CompType::SC_AND_BC: this->cands_sc_and_bc(lhs, tokens, option); break;
-        case CompType::NONE     : this->cands_filepath (tokens);              break;
+        case CompType::CARAPACE : this->cands_carapace (tokens);         break;
+        case CompType::COMMAND  : this->cands_command  (tokens, option); break;
+        case CompType::GREP     : this->cands_grep     (tokens, option); break;
+        case CompType::PATH     : this->cands_filepath (tokens);         break;
+        case CompType::PREVIEW  : this->cands_filepath (tokens);         break;
+        case CompType::SHELL    : this->cands_shell    (tokens, option); break;
+        case CompType::NONE     : this->cands_filepath (tokens);         break;
     }
 
     // Convert completion candidates to lines for display.
@@ -569,11 +557,12 @@ String EditHelper::complete(StringView lhs) const
     // Get the first candidate (this item will be used many times in the following).
     const Pair<String, String>& cand_first = (*this->cands)[0];
 
-    // Concatenate tokens except the last token.
-    // If the last token is a whitespace token, then do not drop the last token.
+    // The raw token (possibly quoted) is replaced, while the unquoted one is used for matching.
+    const StringView raw_token = tokens.back();
+    const StringView last_token = unquote(raw_token);
     StringView lhs_without_last_token = (
-        tokens.back().starts_with(" ") or tokens.back().starts_with("\t") or not cand_first.first.starts_with(tokens.back())
-    ) ? StringView(lhs) : StringView(lhs.data(), lhs.size() - tokens.back().size());
+        raw_token.starts_with(" ") or raw_token.starts_with("\t") or not cand_first.first.starts_with(last_token)
+    ) ? StringView(lhs) : StringView(lhs.data(), lhs.size() - raw_token.size());
 
     // Compute completion string.
     if ((num_cands == 1) and cand_first.first.ends_with('/'))
@@ -581,20 +570,19 @@ String EditHelper::complete(StringView lhs) const
         // Extra slash will be added when directory path is completed.
         // However, slash is already added to the completion token,
         // therefore just adding the completion token is enough.
-        return String(lhs_without_last_token) + cand_first.first;
+        return String(lhs_without_last_token) + shell_quote(cand_first.first, false);
     }
     else if (num_cands == 1)
     {
         // Add extra white-space at the end if number of completion candidate is one.
-        return String(lhs_without_last_token) + cand_first.first + ' ';
+        return String(lhs_without_last_token) + shell_quote(cand_first.first, true) + ' ';
     }
     else
     {
-        // Create an array of completion strings.
+        // Create an array of completion strings and find the common substring among them.
         constexpr auto get_first = [](const Pair<String, String>& pair) noexcept -> String { return pair.first; };
         Vector<String> keys = transform<Pair<String, String>, String>(*this->cands, get_first);
-
-        return String(lhs_without_last_token) + String(get_common_substr(keys));
+        return String(lhs_without_last_token) + shell_quote(get_common_substr(keys), false);
     }
 
 }   // }}}
@@ -602,23 +590,6 @@ String EditHelper::complete(StringView lhs) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // EditHelper: Private functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void EditHelper::cands_bashcomp(StringView lhs, const Vector<StringView>& tokens)
-{   // {{{
-
-    // Construct bash-completion instance if it is not constructed yet.
-    if (not this->bash_completer.has_value())
-        this->bash_completer.emplace();
-
-    // Compute completion candidates from bash-completion.
-    for (const String& c : this->bash_completer->complete(lhs))
-        this->cands->emplace_back(c, c);
-
-    // If no candidates found from bash-completion, then compute candidates from file path.
-    if (this->cands->empty())
-        this->cands_filepath(tokens);
-
-}   // }}}
 
 void EditHelper::cands_command(const Vector<StringView>& tokens, const String& option)
 {   // {{{
@@ -647,7 +618,7 @@ void EditHelper::cands_command(const Vector<StringView>& tokens, const String& o
 
     // Prepare command cache.
     if (this->cache_commands.size() == 0)
-        for (const String& cmd : this->shared_future_cache_commands.get())
+        for (const String& cmd : shared_future_cache_commands.get())
             this->cache_commands.emplace_back(cmd);
 
     // Filter matched command names.
@@ -660,8 +631,18 @@ void EditHelper::cands_command(const Vector<StringView>& tokens, const String& o
 void EditHelper::cands_carapace(const Vector<StringView>& tokens)
 {   // {{{
 
-    for (const Pair<StringView, StringView>& pair : this->carapace_service.complete(tokens))
-        this->cands->emplace_back(pair.first, pair.second);
+    // Split user input token to a tuple of:
+    //   * directory path to be searched,
+    //   * query string for filtering search result.
+    const auto [query_dir, query_key] = split_to_target_and_query(tokens);
+
+    // Colorize the completion candidates based on the style information from carapace,
+    // and append them to the candidate list.
+    for (const auto& [path, name, color_code] : this->carapace_service.complete(tokens))
+        this->cands->emplace_back(path, colorize_name(name, query_key, color_code));
+
+    // If no candidates found from carapace, then fallback to file path completion.
+    if (this->cands->empty()) this->cands_filepath(tokens);
 
 }   // }}}
 
@@ -670,31 +651,20 @@ void EditHelper::cands_filepath(const Vector<StringView>& tokens)
 
     // Split user input token to a tuple of:
     //   * directory path to be searched,
-    //   * query string for filtering seach result.
+    //   * query string for filtering search result.
     const auto [query_dir, query_key] = split_to_target_and_query(tokens);
 
-    // Show dot file if current file name started with dot.
-    const bool show_dot = (query_key.size() > 0) and (query_key[0] == '.');
+    // List the matched entries. The prefix filtering, the hidden file filtering,
+    // and the time limit are all handled inside PathX::listdir.
+    const ListdirResult listing = query_dir.listdir(query_key);
 
-    // Search the directory and filter out unnecessary search results.
-    for (const String& name : query_dir.listdir())
+    for (const DirEntry& entry : listing.entries)
     {
-        // Skip dot files if the query key is not a dot file.
-        if ((not show_dot) and (name[0] == '.'))
-            continue;
+        // Compute path of the target file.
+        const Path path = query_dir / entry.name;
 
-        // If match with the user input.
-        if (name.starts_with(query_key))
-        {
-            // Compute path of the target file.
-            Path path = query_dir / name;
-
-            // Get the colorised name as a description of the completion.
-            String desc = colorize_name(name, path, query_key);
-
-            // Append query string and display string.
-            this->cands->emplace_back(String(path.c_str()), String(desc));
-        }
+        // Append query string and colorized display string.
+        this->cands->emplace_back(path.string(), colorize_name(entry.name, query_key, get_color(entry)));
     }
 
 }   // }}}
@@ -740,72 +710,6 @@ void EditHelper::cands_grep(const Vector<StringView>& tokens, const String& opti
 
         if (target.starts_with(token))
             this->cands->emplace_back(target, target);
-    }
-
-}   // }}}
-
-void EditHelper::cands_option(const Vector<StringView>& tokens)
-{   // {{{
-
-    constexpr auto colorize_description = [](StringView desc, StringView token) -> String
-    // Colorize the command name in the description based on the user input token.
-    //
-    // [Args]
-    //   desc  (const String&): [IN] Description string to be colorized.
-    //   token (const String&): [IN] User input token for colorization.
-    //
-    // [Returns]
-    //   (String): Colorized description string for display.
-    {
-        // Returns without colorization if the user input token is empty or the token is invalid.
-        if (token.empty() or desc.size() < token.size())
-            return String(desc);
-
-        // Get the color code for the command name in the description.
-        StringView color = StringView("");
-        if (desc.starts_with("\x1B["))
-            color = StringView(desc.data(), desc.find('m') + 1);
-
-        return std::format("\x1B[35m{}{}{}", token, color, desc.substr(token.size() + color.size()));
-    };
-
-    // Regular expression patterns for colorization.
-    static const std::regex pattern_color1(R"(^--[\w-]+|^-\w)");
-    static const std::regex pattern_color2(R"((=)([\w-]+))");
-
-    // Get the target command.
-    const String command = String((tokens.size() > 0) ? tokens[0] : StringView(""));
-
-    // Run command with "--help" option if not registered in the cache.
-    if (not this->cache_opt.contains(command))
-    {
-        // Create new map instance.
-        this->cache_opt[command] = Vector<Tuple<String, String>>();
-
-        for (const String& opt : get_options_from_help(command))
-        {
-            // Get colorized description.
-            String desc = opt;
-            desc = std::regex_replace(desc, pattern_color1,   "\x1B[94m$&\x1B[0m");
-            desc = std::regex_replace(desc, pattern_color2, "$1\x1B[93m$2\x1B[0m");
-
-            // Append to the cache vector.
-            this->cache_opt[command].emplace_back(opt, desc);
-        }
-    }
-
-    // Get query token.
-    const StringView token = (tokens.size() > 0) ? tokens.back() : StringView("");
-
-    // Add matched options.
-    for (const auto& [opt, desc] : this->cache_opt[command])
-    {
-        // Skip if not matched with the current token.
-        if (not opt.starts_with(token))
-            continue;
-
-        // Append to the candidate list.
-        this->cands->emplace_back(opt, colorize_description(desc, token));
     }
 
 }   // }}}
@@ -900,86 +804,6 @@ void EditHelper::cands_shell(const Vector<StringView>& tokens, const String& opt
 
 }   // }}}
 
-void EditHelper::cands_subcmd(const Vector<StringView>& tokens, const String& option)
-{   // {{{
-
-    // Get the target token.
-    const StringView token = (tokens.size() > 0) ? tokens.back() : String("");
-
-    // Run the given command and add the result to the cache
-    // if the given command is not registered in the cache.
-    if (not this->cache_subcmd.contains(option))
-    {
-        // Run command and register each line.
-        for (const StringView line : split(run_command(option, RUN_COMMAND_GETOUT), "\n"))
-            if (line.starts_with("  ") and not line.starts_with("     "))
-                this->cache_subcmd[option].emplace_back(strip(line));
-    }
-
-    for (const String& line : this->cache_subcmd[option])
-    {
-        // Skip unmatched line.
-        if (not line.starts_with(token))
-            continue;
-
-        // Get the position of the first whitespace in the line.
-        SizeType pos_ws = line.find(' ');
-
-        // If the line doesn't have a space, the entire line is a completion candidate and description.
-        if (pos_ws == String::npos)
-        {
-            this->cands->emplace_back(line, line);
-            continue;
-        }
-
-        // Split the line into a command name and an explanation.
-        StringView name = StringView(line.data(), pos_ws);
-        StringView expl = StringView(line.data() + name.size(), line.size() - name.size());
-
-        // Initialize the description string.
-        String desc;
-
-        // Append the command name to the description string with colorization.
-        if (token.empty() or (name.size() < token.size()))
-            desc = std::format("\x1B[32m{}\x1B[m", name);
-        else
-            desc = std::format("\x1B[35m{}\x1B[32m{}\x1B[0m", token, name.substr(token.size()));
-
-        // Memorize the start position of the explanation.
-        SizeType pos_start_expl = desc.size();
-
-        // Append explanation to the description string.
-        desc += expl;
-
-        // Replace the seperator whitespace to dot for better visibility.
-        SizeType idx = pos_start_expl;
-        while ((++idx < desc.size()) and (desc[idx] == ' '))
-            desc[idx] = '.';
-        if (idx > pos_start_expl)
-            desc[--idx] = ' ';
-
-        this->cands->emplace_back(name, desc);
-    }
-
-}   // }}}
-
-void EditHelper::cands_sc_and_bc(StringView lhs, const Vector<StringView>& tokens, const String& option)
-{   // {{{
-
-    // Case 1: tokens == ["command name"].
-    if (tokens.size() <= 1)
-        ; /* Do nothing. */
-
-    // Case 2: tokens == ["command name", "something"].
-    else if (tokens.size() == 2)
-        this->cands_subcmd(tokens, option);
-
-    // Case 3: tokens == ["command name", "subcommand", "something"].
-    else
-        this->cands_bashcomp(lhs, tokens);
-
-}   // }}}
-
 void EditHelper::lines_from_cands(const Vector<Pair<String, String>>& cands)
 {   // {{{
 
@@ -1008,33 +832,5 @@ void EditHelper::lines_from_cands(const Vector<Pair<String, String>>& cands)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // EditHelper: Private static member functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void EditHelper::init_shared_futures(const Path& outdir, const RedAlienConfig& cfg)
-{   // {{{
-
-    // Get the paths of the command info and bash info files.
-    const Path path_cmnd_info = outdir / "cmnd_info.txt";
-    const Path path_bash_info = outdir / "bash_info.txt";
-
-    // Create the cache of available command names.
-    shared_future_cache_commands = launch_async(get_available_commands, path_cmnd_info, path_bash_info).share();
-
-    // Create the cache of compiled regular expression patterns for completion matching.
-    shared_future_vec_patterns_regex = launch_async(compile_regex_patterns, cfg.completions).share();
-
-};  // }}}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// EditHelper: Static member variables
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-std::shared_future<Vector<String>> EditHelper::shared_future_cache_commands;
-// Shared future instance of the command cache.
-
-std::shared_future<Vector<Vector<RegEx>>> EditHelper::shared_future_vec_patterns_regex;
-// Cache of compiled regular expression patterns for completion matching.
-
-std::once_flag EditHelper::flag_init_shared_futures;
-// A flag for one-time initialization of shared future instances.
 
 // vim: expandtab tabstop=4 shiftwidth=4 fdm=marker

@@ -17,6 +17,9 @@ OBJ_DIR := ./objects
 CXX_FILES := $(shell find $(SRC_DIR) -type f | grep -v hxx | grep -v main.cxx | sort)
 OBJ_FILES := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/%,$(CXX_FILES:.cxx=.o))
 
+# Detect the architecture of the host machine.
+ARCH := $(shell sh ../utils/get_arch.sh)
+
 #-------------------------------------------------------------------------------
 # C++ build settings
 #-------------------------------------------------------------------------------
@@ -28,7 +31,7 @@ LIBS    := -L/usr/local/lib -lncurses
 COVOPTS := -fPIC -coverage -fprofile-update=atomic -DGCOV_BUILD
 
 # Commands for Docker-based static build.
-DOCKER_IMAGE := tiskw/redalien:alpine3.23
+DOCKER_IMAGE := tiskw/redalien:alpine3.23_amd64
 DOCKER_BASE  := run --rm -it -u `id -u`:`id -g` -v `pwd`:/work -w /work
 DOCKER_CMND  := $(DOCKER_BASE) $(DOCKER_IMAGE)
 
@@ -53,6 +56,7 @@ help:
 
 test:
 	make clean
+	make carapace
 	cp -r $(ORG_DIR) $(SRC_DIR)
 	git init
 	@docker $(DOCKER_CMND) sh -c 'make -i -j4 test_inside_docker'
@@ -79,12 +83,17 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cxx
 redalien: source/main.cxx $(CXX_FILES)
 	$(CC) $(CFLAGS) $(COVOPTS) -o run_test -I$(SRC_DIR) source/main.cxx $(CXX_FILES)
 
+carapace:
+	cd ../downloads && make carapace-bin-$(ARCH).tar.gz
+	tar -xzf ../downloads/carapace-bin-$(ARCH).tar.gz
+	rm -f LICENSE README.md
+
 #-------------------------------------------------------------------------------
 # Other commands
 #-------------------------------------------------------------------------------
 
 clean:
-	rm -f *.gcda *.gcno *.gcov lcov.info run_test
+	rm -f *.gcda *.gcno *.gcov lcov.info run_test carapace
 	rm -rf lcov source objects
 
 # vim: noexpandtab shiftwidth=4 tabstop=4 fdm=marker

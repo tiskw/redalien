@@ -121,6 +121,9 @@ String TextEditor::extract_back(StringView sv, PtrDiff n)
 // TextEditor: Getter and setter functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+bool TextEditor::empty(void) const noexcept
+{ return this->get_lhs().empty() and this->get_rhs().empty(); }
+
 StringView TextEditor::get_lhs(void) const
 { return this->current_buffer().lhs_view(); }
 

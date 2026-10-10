@@ -63,7 +63,7 @@ inline constexpr uint64_t hash(StringView str, uint64_t hash_init = 0xcbf29ce484
 
     return hash;
 
-};  // }}}
+}   // }}}
 
 inline constexpr uint64_t hash(const char* str, uint64_t hash_init = 0xcbf29ce484222325)
 // Compute hash value of the given string.

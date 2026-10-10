@@ -7,11 +7,11 @@
 
 // Include STL headers.
 #include <fstream>
-#include <future>
 #include <iostream>
 
 // Include POSIX headers.
 #include <signal.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // Include the header of the cxxopts library.
@@ -23,6 +23,7 @@
 #include "dtypes.hxx"
 #include "error.hxx"
 #include "gen_path_cache.hxx"
+#include "path_x.hxx"
 #include "read_cmd.hxx"
 #include "string_utils.hxx"
 #include "tokenizers.hxx"
@@ -37,14 +38,15 @@ namespace
 {
     String get_git_branch_info(void)
     // Get git branch and status information and return as a colored string.
-    // 
+    //
     // [Returns]
     //   (String): Colored string of git information.
     //
     {   // {{{
 
         // Returns empty string if not a Git directory.
-        if (not stdfs::exists(".git"))
+        std::error_code ec;
+        if (not stdfs::exists(".git", ec) or ec)
             return "";
 
         // Get the branch name and its status at the same time.
@@ -62,7 +64,7 @@ namespace
         // Initialize the git branch name and the changed flag.
         String branch     = "???";
         bool   is_changed = false;
-    
+
         for (const StringView sv : split(git_status, "\n"))
         {
             // Get the branch name.
@@ -75,110 +77,60 @@ namespace
         }
 
         // Colorize as yellow if the git status is "changed".
-        if (!branch.empty() and is_changed)
+        if (not branch.empty() and is_changed)
             return "\x1B[38;2;235;193;111m" + branch + "!\x1B[m";
 
         // Colorize as green if the git status is "unchanged".
-        if (!branch.empty())
+        if (not branch.empty())
             return "\x1B[38;2;181;189;104m" + branch +  "\x1B[m";
 
         return branch;
 
     }   // }}}
 
-    void print_ps0(String ps0l, String ps0r, StringView hline_color, StringView hline_char)
-    // Print the prompt string 0.
+    bool is_valid_outdir(const Path& path)
+    // Check if the given path is a valid output directory.
     //
     // [Args]
-    //   ps0l        (String)    : [IN] Left side of the prompt string 0.
-    //   ps0r        (String)    : [IN] Right side of the prompt string 0.
-    //   hline_color (StringView): [IN] Color code of the horizontal line. If empty, the horizontal line will not be printed.
-    //   hline_char  (StringView): [IN] Character for the horizontal line.
+    //   path (const Path&): [IN] Path to be checked.
     //
-    // [Notes]
-    //   This function supports simple replacement of variables.
+    // [Returns]
+    //   (bool): True if the path is a valid output directory, otherwise false.
     //
     {   // {{{
 
-        // Start to compute git info, because this process takes time.
-        std::future<String> future_git_info;
-        if (ps0r.find("{git}") != String::npos)
-            future_git_info = launch_async(get_git_branch_info);
+        struct stat st{};
+        return (lstat(path.c_str(), &st) == 0) and S_ISDIR(st.st_mode)
+            and (st.st_uid == ::getuid()) and ((st.st_mode & 077) == 0);
 
-        // Get terminal size.
-        const Size term_size = get_terminal_size();
+    }   // }}}
 
-        // Print the horizontal line.
-        if (hline_color.size() > 0)
-        {
-            // Create the horizontal line.
-            String hline = String(hline_color);
-            hline.reserve(hline_color.size() + term_size.cols * hline_char.size());
-            for (int c = 0; c < term_size.cols; ++c)
-                hline.append(hline_char);
+    void print_ps_ex(String ps_ex)
+    // Print the extra prompt string at the right end of the line above the user input line.
+    //
+    // [Args]
+    //   ps_ex (String): [IN] Extra prompt string to be printed.
+    //
+    {   // {{{
 
-            // Print the horizontal line.
-            std::cout << hline << "\x1B[0m" << '\n';
-        }
+        // Do nothing if the given extra prompt string is empty.
+        if (ps_ex.empty()) return;
 
-        // Do not print ps0 if empty.
-        if (ps0l.empty() and ps0r.empty())
-            return;
+        // Replace the placeholder "{git}" if exists.
+        if (const auto pos = ps_ex.find("{git}"); pos != String::npos)
+            ps_ex.replace(pos, 5, get_git_branch_info());
 
-        // Reserve temporary buffer.
-        constexpr SizeType buffer_size = 512;
-        char buffer[buffer_size];
+        // Do nothing if the target string is empty.
+        if (ps_ex.empty()) return;
 
-        // Get the current time.
-        time_t raw_time = std::time(nullptr);
+        // Compute the width of the extra prompt string.
+        int32_t width_ps_ex = width(ps_ex);
 
-        // Replace basic variables.
-        if (ps0l.find("{user}") != String::npos and (getlogin_r(buffer, buffer_size) == 0))
-            ps0l = replace(ps0l, "{user}", buffer);
-        if (ps0l.find("{host}") != String::npos and (gethostname(buffer, buffer_size) == 0))
-            ps0l = replace(ps0l, "{host}", buffer);
-        if (ps0l.find("{date}") != String::npos)
-            ps0l = replace(ps0l, "{date}", get_time(raw_time, "%Y/%m/%d"));
-        if (ps0l.find("{time}") != String::npos)
-            ps0l = replace(ps0l, "{time}", get_time(raw_time, "%H:%M:%S"));
-        if ((ps0l.find("{cwd}") != String::npos) and (getcwd(buffer, buffer_size) != nullptr))
-            ps0l = replace(ps0l, "{cwd}", buffer);
-        if (ps0l.find("{empty}") != String::npos)
-            ps0l = replace(ps0l, "{empty}", "");
+        // Get the terminal size.
+        Size term_size = get_terminal_size();
 
-        // Replace environmetal variables.
-        while (true)
-        {
-            // Get the location of the open curly brackets.
-            const String::size_type pos1 = ps0l.find("{");
-            if (pos1 == String::npos)
-                break;
-
-            // Get the location of the close curly brackets.
-            const String::size_type pos2 = ps0l.find("}", pos1 + 1);
-            if (pos2 == String::npos)
-                break;
-
-            // Get the replace target and variable name.
-            const String target = ps0l.substr(pos1,     pos2 - pos1 + 1);
-            const String envvar = ps0l.substr(pos1 + 1, pos2 - pos1 - 1);
-            const char*  envval = getenv(envvar.c_str());
-
-            // Replace the target with the environment variable value if exists, otherwise replace with empty string.
-            ps0l = replace(ps0l, target, envval ? envval : "");
-        }
-
-        // Replace the "{git}" variable with the git info.
-        if (ps0r.find("{git}") != String::npos)
-            ps0r = replace(ps0r, "{git}", future_git_info.get());
-
-        // Append whitespaces to the left side of the ps0.
-        SizeType width_ps0 = width(ps0l) + width(ps0r);
-        if (width_ps0 < term_size.cols)
-            ps0l += String(term_size.cols - width_ps0, ' ');
-
-        // Print ps0.
-        std::cout << ps0l << ps0r << std::endl;
+        // Print the extra prompt string at the right end of the editing line.
+        std::cout << std::format("\x1B[1F\x1B[{}G{}\x1B[1E", term_size.cols - width_ps_ex, ps_ex) << std::flush;
 
     }   // }}}
 
@@ -225,34 +177,40 @@ namespace
 
     }   // }}}
 
-    Tuple<String, String> run_keybind(const ReadCmdOut& rc_out, const StringMap& keybinds, const Path& path_plugin_out)
-    // Run the given keybind.
+    Tuple<String, String> run_plugin(const ReadCmdOut& rc_out, const StringMap& plugin_trigger_keys, const Path& path_plugin_out)
+    // Run the plugin command bound to the stop key, and read its output file.
     //
     // [Args]
-    //   rc_out        (const ReadCmdOut&): [IN] Output of "readcmd" function.
-    //   keybinds      (const StringMap&) : [IN] Map of keybinds in the config file.
-    //   output_plugin (const String&)    : [IN] Path to the plugin output file.
+    //   rc_out              (const ReadCmdOut&): [IN] Output of "readcmd" function.
+    //   plugin_trigger_keys (const StringMap&) : [IN] Map of plugin trigger keys in the config file.
+    //   path_plugin_out     (const Path&)      : [IN] Path to the plugin output file.
     //
     // [Returns]
-    //   (Tuple<String, String>): Left and right hand side of the editing buffer after keybind.
+    //   (Tuple<String, String>): Left and right hand side of the editing buffer after running the plugin.
     //
     {   // {{{
 
         // If the given key is not registered, do nothing.
-        if (not keybinds.contains(rc_out.stop))
+        if (not plugin_trigger_keys.contains(rc_out.stop))
             return {rc_out.lhs, rc_out.rhs};
 
         // Create a map for placeholders replacement.
         const StringMap extra = {
             {"{lhs}",           rc_out.lhs},
             {"{rhs}",           rc_out.rhs},
-            {"{output_plugin}", expand_tilde(path_plugin_out.string())},
+            {"{output_plugin}", path_plugin_out.string()},
         };
 
         // Tokenize the command string with placeholder replacement.
+        // The {path_plugin} placeholder will be processed in the "tokenize_with_placeholder_replacement" function.
         Vector<String> cmd_tokens;
-        for (const String& token : tokenize_with_placeholder_replacement(keybinds.at(rc_out.stop), extra, TOKENIZE_DEQUOTE))
+        for (const String& token : tokenize_with_placeholder_replacement(plugin_trigger_keys.at(rc_out.stop), extra, TOKENIZE_DEQUOTE))
             cmd_tokens.emplace_back(token);
+
+        // Remove the command output file if it exists.
+        std::error_code ec;
+        if (stdfs::exists(path_plugin_out, ec))
+            stdfs::remove(path_plugin_out, ec);
 
         // Run the tokenized command.
         run_command(cmd_tokens);
@@ -317,20 +275,27 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
         return EXIT_SUCCESS;
     }
 
-    // Run other task and exit if -r/--run is specified.
+    // Print version information and exit if -v/--version is specified.
+    if (args.count("version"))
+    {
+        std::cout << VERSION << '\n';
+        return EXIT_SUCCESS;
+    }
+
+    // Run other task and exit if -g/--gen-cache is specified.
     if (args.count("gen-cache"))
         return generate_path_commands_cache();
 
-    // The argument --outdir is a mandatory option for this program, threrfore if --outdir is not
+    // The argument --outdir is a mandatory option for this program, therefore if --outdir is not
     // specified or invalid, print an error message and exit. Note that we include a brief sleep
     // at the end. This is because this program is designed to be called repeatedly, and the pause
     // prevents the CPU from becoming overburdened by rapid, repetitive execution.
-    const Path outdir = args.count("outdir") ? Path(args["outdir"].as<String>()) : Path("");
-    if (not stdfs::is_directory(outdir))
+    const Path outdir = args.count("outdir") ? Path(expand_tilde(args["outdir"].as<String>())) : Path("");
+    if (not is_valid_outdir(outdir))
     {
         print_error("Error", "The mandatory option --outdir is not provided or invalid.");
 
-        // Sleep for 200 milliseconds before checking again.
+        // Sleep for 200 milliseconds.
         struct timespec ts;
         ts.tv_sec  = 0;
         ts.tv_nsec = 200 * 1000 * 1000;
@@ -354,11 +319,11 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     // Convert the input_ptr to a String.
     const String input_str = (input_ptr != nullptr) ? String(input_ptr) : String("");
 
-    // Print the prompt 0.
-    print_ps0(cfg.ps0l, cfg.ps0r, cfg.hline_color, cfg.hline_char);
-
     // Initialize text buffer (priority: command line argument > input_ptr).
     ReadCmdOut rc_out = {"", "", "", args.count("input") ? args["input"].as<String>() : input_str};
+
+    // Print the extra prompt string if specified in the config file.
+    print_ps_ex(cfg.ps_ex);
 
     // Start user editing loop.
     while (true)
@@ -369,8 +334,9 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
         // Exit from the while loop if the user editing stopped without stop key.
         if (rc_out.stop.size() == 0) break;
 
-        // Otherwise, run keybind command of the stop key, and continue the loop.
-        std::tie(rc_out.lhs, rc_out.rhs) = run_keybind(rc_out, cfg.keybinds, path_plugin_out);
+        // Otherwise, run plugin command of the stop key, and continue the loop.
+        if (cfg.plugin_trigger_keys.contains(rc_out.stop))
+            std::tie(rc_out.lhs, rc_out.rhs) = run_plugin(rc_out, cfg.plugin_trigger_keys, path_plugin_out);
     }
 
     // Compute user input string.
@@ -378,29 +344,26 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     user_input += rc_out.lhs;
     user_input += rc_out.rhs;
 
-    // Print timestamp and a whitespace.
-    std::cout << cfg.datetime_pre << get_time(std::time(nullptr), "%Y/%m/%d %H:%M:%S") << cfg.datetime_post << ' ';
+    // Print timestamp, a whitespace and the colorized user input.
+    std::cout << cfg.datetime_pre << get_time(std::time(nullptr), "%Y/%m/%d %H:%M:%S") << cfg.datetime_post;
+    std::cout << ' ' << colorize(user_input);
 
-    // Write the user input to the output file if specified.
-    if (args.count("outdir"))
+    // Get the path to the output file.
+    const Path path_output = outdir / "redalien.out";
+
+    // Open the output file.
+    std::ofstream ofs(path_output);
+    if (not ofs.is_open())
     {
-        // Get the path to the output file.
-        const Path path_output = outdir / "redalien.out";
-
-        // Open the output file.
-        std::ofstream ofs(path_output);
-        if (not ofs.is_open())
-        {
-            std::cerr << "Failed to open file: " << path_output << std::endl;
-            return EXIT_FAILURE;
-        }
-
-        // Write the user input to the output file.
-        ofs << user_input << '\n';
-
-        // Close the file.
-        ofs.close();
+        std::cerr << "Failed to open file: " << path_output << std::endl;
+        return EXIT_FAILURE;
     }
+
+    // Write the user input to the output file.
+    ofs << user_input << '\n';
+
+    // Close the file.
+    ofs.close();
 
     return EXIT_SUCCESS;
 

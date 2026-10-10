@@ -55,7 +55,7 @@ ptrdiff_t utf8_encode(int32_t uc, uint8_t* dst);
 // Encode a single Unicode codepoint to a UTF-8 string.
 //
 // [Args]
-//   uc  (uint32_t)  : [IN]  Unicode codepoint.
+//   uc  (int32_t)   : [IN]  Unicode codepoint.
 //   dst (uint8_t*)  : [OUT] Pointer to the output string buffer (must be at least 4 bytes long).
 //
 // [Returns]
@@ -82,16 +82,16 @@ Generator<StringView> utf8_iter(const char* str, size_t size = 0);
 //   str  (const char*): [IN] Pointer to the input string.
 //   size (size_t)     : [IN] Length of the input string. If zero, the length is computed using std::strlen.
 //
-// [Returns]
-//   (Generator<StringView>): Generator of StringView of UTF-8 characters.
+// [Yields]
+//   (StringView): StringView of UTF-8 characters.
 
 Generator<Tuple<int32_t, const char*>> utf8_decode_iter(const char* str, size_t size = 0);
 // Iteratively parse UTF-8 characters from the given string.
 //
 // [Args]
 //
-// [Returns]
-//   (Generator<Tuple<int32_t, uint8_t*>>): Codepoint of UTF-8 character.
+// [Yields]
+//   (Tuple<int32_t, const char*>): Codepoint of UTF-8 character.
 
 CharX utf8_decode_next_charx(const char* str);
 // Iteratively parse UTF-8 characters from the given string and return them as CharX.

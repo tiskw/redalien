@@ -5,6 +5,10 @@
 // Include the primary header.
 #include "tokenizers.hxx"
 
+// Include STL headers.
+#include <algorithm>
+#include <cctype>
+
 // Include the headers of custom modules.
 #include "utils.hxx"
 
@@ -48,12 +52,12 @@ namespace
     // This function is used in the "tokenize" function.
     //
     // [Args]
-    //   iter     (StringConstIter): [IN]  Start iterator.
-    //   iter_end (StringConstIter): [IN]  End iterator.
-    //   quote    (const uint64_t) : [IN]  Quote type.
+    //   iter     (StringViewConstIter): [IN]  Start iterator.
+    //   iter_end (StringViewConstIter): [IN]  End iterator.
+    //   quote    (const char)         : [IN]  Quote character.
     //
     // [Returns]
-    //   (StringConstIter): Iterator pointing to the end of the token.
+    //   (StringViewConstIter): Iterator pointing to the end of the token.
     //
     {   // {{{
 
@@ -69,11 +73,11 @@ namespace
     // This function is used in the "tokenize" function.
     //
     // [Args]
-    //   iter     (StringConstIter): [IN]  Start iterator.
-    //   iter_end (StringConstIter): [IN]  End iterator.
+    //   iter     (StringViewConstIter): [IN]  Start iterator.
+    //   iter_end (StringViewConstIter): [IN]  End iterator.
     //
     // [Returns]
-    //   (StringConstIter): Iterator pointing to the end of the token.
+    //   (StringViewConstIter): Iterator pointing to the end of the token.
     //
     {   // {{{
 
@@ -88,41 +92,17 @@ namespace
     // This function is used in the "tokenize" function.
     //
     // [Args]
-    //   iter     (StringConstIter): [IN]  Start iterator.
-    //   iter_end (StringConstIter): [IN]  End iterator.
+    //   iter     (StringViewConstIter): [IN]  Start iterator.
+    //   iter_end (StringViewConstIter): [IN]  End iterator.
     //
     // [Returns]
-    //   (StringConstIter): Iterator pointing to the end of the token.
+    //   (StringViewConstIter): Iterator pointing to the end of the token.
     //
     {   // {{{
 
         while ((iter != iter_end) and (*iter != ' ') and (*iter != '\t'))
             ++iter;
         return iter;
-
-    }   // }}}
-
-    bool is_quoted_token(StringView token)
-    // Check if the given token is a quoted token.
-    // This function is used in the "tokenize" function.
-    //
-    // [Args]
-    //   token (StringView): [IN] Target token.
-    //
-    // [Returns]
-    //   (bool): True if the token is a quoted token, otherwise false.
-    //
-    {   // {{{
-
-        // Do not consider the token as a quoted token if its length is less than 2,
-        if (token.size() < 2) return false;
-
-        // Check if the token is quoted by single/double quote.
-        if (token.starts_with("'")  and token.ends_with("'") ) { return true; }
-        if (token.starts_with("\"") and token.ends_with("\"")) { return true; }
-
-        // Otherwise, the token is not a quoted token.
-        return false;
 
     }   // }}}
 }
@@ -164,8 +144,9 @@ Generator<StringView> tokenize(StringView sv, TokenizeOption option)
         StringView token = StringView(iter_bgn, iter - iter_bgn);
 
         // De-quote the token if the option to de-quote tokens is set.
-        if (dequote_tokens and is_quoted_token(token))
-            token = token.substr(1, token.size() - 2);
+        // Unclosed quotes (e.g. "'abc") are kept as-is.
+        if (dequote_tokens and (not is_open_quote(token)))
+            token = unquote(token);
 
         co_yield token;
     }
@@ -203,6 +184,96 @@ Generator<String> tokenize_with_placeholder_replacement(StringView command, cons
 
         co_yield token;
     }
+
+}   // }}}
+
+bool is_open_quote(StringView token) noexcept
+// Returns true if the token starts with a quote that is not closed yet (e.g. "'my fi").
+//
+// [Args]
+//   token (StringView): [IN] Token to be checked.
+//
+// [Returns]
+//   (bool): True if the token starts with a quote that is not closed yet.
+//
+{   // {{{
+
+    if      (token.empty()   ) return false;
+    else if (token[0] == '\'') return (token.size() == 1) or (token.back() != '\'');
+    else if (token[0] == '"' ) return (token.size() == 1) or (token.back() != '"');
+    else                       return false;
+
+}   // }}}
+
+StringView unquote(StringView token) noexcept
+// Strip the surrounding quotes of a token ("'my fi" -> "my fi", "'a b'" -> "a b").
+//
+// [Args]
+//   token (StringView): [IN] Token to be unquoted.
+//
+// [Returns]
+//   (StringView): Unquoted token.
+//
+{   // {{{
+
+    // Return the token as-is if it is empty or does not start with a quote.
+    if (token.empty() or ((token[0] != '\'') and (token[0] != '"')))
+        return token;
+
+    // Remove the surrounding quotes if the token starts with a quote.
+    const char q = token[0];
+    token.remove_prefix(1);
+
+    // Remove the closing quote if it exists.
+    if ((not token.empty()) and (token.back() == q))
+        token.remove_suffix(1);
+
+    return token;
+
+}   // }}}
+
+String shell_quote(StringView sv, bool close)
+// Quote the string with single quotes if it contains shell-special characters.
+// The closing quote is omitted if "close" is false, so that users can continue typing.
+//
+// [Args]
+//   sv    (StringView): [IN] String to be quoted.
+//   close (bool)      : [IN] If true, add a closing quote
+//
+{   // {{{
+
+    constexpr auto is_safe = [](unsigned char c) -> bool
+    // Check if the character is safe for shell quoting.
+    //
+    // [Args]
+    //   c (unsigned char): [IN] Character to be checked.
+    //
+    // [Returns]
+    //   (bool): True if the character is safe for shell quoting.
+    {
+        constexpr StringView safe = "_-./:@+=,%~";
+        return std::isalnum(c) or (c >= 0x80) or (safe.find(c) != StringView::npos);
+    };
+
+    // Keep "~/" outside of the quotes, otherwise the tilde expansion is disabled.
+    if (sv.starts_with("~/") and (sv.size() > 2))
+        return "~/" + shell_quote(sv.substr(2), close);
+
+    // Return as it is if all characters are safe (non-ASCII characters are regarded as safe).
+    if (std::all_of(sv.begin(), sv.end(), is_safe)) return String(sv);
+
+    // Quote the string with single quotes, and escape any single quotes inside the string.
+    String r = "'";
+    for (const char c : sv)
+    {
+        if (c == '\'') { r += "'\\''"; }
+        else           { r += c;       }
+    }
+
+    // Add a closing quote if requested.
+    if (close) r += '\'';
+
+    return r;
 
 }   // }}}
 

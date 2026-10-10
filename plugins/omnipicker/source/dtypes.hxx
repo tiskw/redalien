@@ -110,7 +110,7 @@ struct FileItem
     String  right = {};        // Right-side string.
     int32_t attr  = A_NORMAL;  // Curses attribute (color, bold, etc.).
     bool    star  = false;     // True if selected (starred).
-   
+
     //--------------------------------------------------------------------------
     // Custom comparison operators
     //--------------------------------------------------------------------------

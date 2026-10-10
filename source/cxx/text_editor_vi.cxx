@@ -15,7 +15,7 @@
 // Unnamed namespace for making classes and functions file-local.
 namespace
 {
-    // Bring TextEditor's protected types and utilities into scope so that the word-motion
+    // Bring TextEditor's public types and utilities into scope so that the word-motion
     // helper functions below can use them without qualification.
     using CharClass = TextEditor::CharClass;
     using CharInfo  = TextEditor::CharInfo;
@@ -343,7 +343,7 @@ void TextEditorVi::edit_normal(const char* str, SizeType size)
     if (ch == 'a') { buffer.move_cursor(+1); mode = Mode::INSERT; return; }
     if (ch == 'A') { buffer.move_end();      mode = Mode::INSERT; return; }
     if (ch == 's') { buffer.deletekey(1);    mode = Mode::INSERT; return; }
-    if (ch == 'C') // Change to end of line (equivarent to 'c$').
+    if (ch == 'C') // Change to end of line (equivalent to "c$").
     {
         this->yank_buffer = String(buffer.rhs_view());
         buffer.erase_rhs();

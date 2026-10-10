@@ -58,8 +58,12 @@ ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& 
 
     // Set of keys that stops readcmd function.
     Set<StringView> stop_keys;
-    for (const auto& pair : cfg.keybinds)
+    for (const auto& pair : cfg.plugin_trigger_keys)
         stop_keys.emplace(pair.first);
+
+    // Parse the key codes for completion and history completion.
+    const char keycode_cand_comp = CharX::parse_printable_char(cfg.cand_comp_key);
+    const char keycode_hist_comp = CharX::parse_printable_char(cfg.hist_comp_key);
 
     // Get terminal size.
     const Size term_size = get_terminal_size();
@@ -85,7 +89,7 @@ ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& 
     if (use_async_compl) { opt_async_compl.emplace(cfg.area_height, term_size.cols, outdir, cfg); }
     else                 { opt_edit_helper.emplace(cfg.area_height, term_size.cols, outdir, cfg); }
 
-    // NOTE: TermUserIF is declared at the end intentionally, bacause the object destruction
+    // NOTE: TermUserIF is declared at the end intentionally, because the object destruction
     // order is the reverse of the declaration, so the terminal is restored to canonical mode
     // before any completion machinery is destroyed.
     TermUserIF termui = TermUserIF(cfg.area_height, term_size.cols);
@@ -123,10 +127,10 @@ ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& 
         // Do nothing if the character is empty.
         if (cx.size() == 0) continue;
 
-        // Update the "inputs" view if it's not nullptr.
+        // Update the "inputs" view if it is used for non-interactive input mode.
         inputs = (inputs.size() > 0) ? (StringView(inputs.begin() + cx.size(), inputs.end())) : inputs;
 
-        // Exit if one of the step key is typed.
+        // Exit if one of the stop key is typed.
         if (stop_keys.contains(cx.printable()))
             return ReadCmdOut(lhs, rhs, cx.printable(), inputs);
 
@@ -137,44 +141,45 @@ ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& 
         // Otherwise (size is 1), process the input character.
         else
         {
-            // Process input character.
-            switch (*cx.c_str())
+            // Get the input character.
+            char c = *cx.c_str();
+
+            // Exit function if Ctrl-C is pressed.
+            if ((c == 0x00) or (c == 0x03))
+                return ReadCmdOut("^C", "", "", inputs);
+
+            // Exit function if Ctrl-D is pressed and the editing buffer is empty (except for vi command mode).
+            else if ((c == 0x04) and ((editor_name != "vi") or (editor->get_mode() == TextEditor::Mode::INSERT)) and editor->empty())
+                return ReadCmdOut("^D", "", "", inputs);
+
+            // History completion.
+            else if (c == keycode_hist_comp)
             {
-                // Exit function if Ctrl-C is pressed.
-                case 0x00:
-                case 0x03:
-                    return ReadCmdOut("^C", "", "", inputs);
-
-                // Exit function if Ctrl-D is pressed.
-                case 0x04:
-                    return ReadCmdOut("^D", "", "", inputs);
-
-                // History completion if Ctrl-E is pressed.
-                case 0x05:
-                    editor->set(String(lhs) + String(histmn.complete(lhs)) + " ", rhs);
-                    break;
-
-                // Execute completion if Ctrl-I (= horizontal tab) is pressed.
-                case 0x09:
-                    if (use_async_compl)
-                    {
-                        editor->set(opt_async_compl->complete_sync(lhs), rhs);
-                    }
-                    else
-                    {
-                        opt_edit_helper->candidate(lhs);
-                        editor->set(opt_edit_helper->complete(lhs), rhs);
-                    }
-                    break;
-
-                // Exit function if ENTER is pressed.
-                case '\n':
-                case '\r':
-                    return ReadCmdOut(lhs, rhs, "", inputs);
-
-                // Otherwise update editing buffer.
-                default: editor->edit(cx.view());
+                if (not hist_comp.empty())
+                    editor->set(String(lhs) + String(hist_comp) + " ", rhs);
             }
+
+            // Execute completion.
+            else if (c == keycode_cand_comp)
+            {
+                if (use_async_compl)
+                {
+                    editor->set(opt_async_compl->complete_sync(lhs), rhs);
+                }
+                else
+                {
+                    opt_edit_helper->candidate(lhs);
+                    editor->set(opt_edit_helper->complete(lhs), rhs);
+                }
+            }
+
+            // Exit function if ENTER is pressed.
+            else if ((c == '\n') or (c == '\r'))
+                return ReadCmdOut(lhs, rhs, "", inputs);
+
+            // Otherwise update editing buffer.
+            else
+                editor->edit(cx.view());
         }
     }
 

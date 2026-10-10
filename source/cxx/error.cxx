@@ -7,6 +7,7 @@
 
 // Include STL headers.
 #include <iostream>
+#include <mutex>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // File-local variables
@@ -15,6 +16,9 @@
 // Unnamed namespace for making classes and functions file-local.
 namespace
 {
+    // A mutex to synchronize access to the error message printing function.
+    std::mutex mutex_error;
+
     // A flag indicating whether the TUI is active or not.
     bool is_tui_active = false;
 
@@ -35,8 +39,11 @@ int32_t print_errmsg(const char (&etype)[], const char (&filename)[], int32_t li
 
     // If the TUI is active, store the error message in the pending_errors vector.
     // Otherwise, print the error message to the standard error stream.
-    if (is_tui_active) { pending_errors.push_back(ss.str()); }
-    else               { std::cerr << ss.str();              }
+    { std::lock_guard<std::mutex> lock(mutex_error);
+
+        if (is_tui_active) { pending_errors.push_back(ss.str()); }
+        else               { std::cerr << ss.str();              }
+    }
 
     // Terminate the software if "terminate" is true.
     if (terminate)
@@ -49,6 +56,8 @@ int32_t print_errmsg(const char (&etype)[], const char (&filename)[], int32_t li
 
 void set_tui_active(bool active)
 {   // {{{
+
+    std::lock_guard<std::mutex> lock(mutex_error);
 
     // Update the TUI active flag.
     is_tui_active = active;

@@ -8,16 +8,36 @@
 #define PATH_X_HXX
 
 // Include STL headers.
+#include <chrono>
 #include <filesystem>
 
 // Include the headers of custom modules.
 #include "dtypes.hxx"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Data types
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct DirEntry
+// An entry of the directory listing.
+{
+    String name;     // Entry name (a trailing '/' is appended for directories).
+    bool   is_dir;   // True if the entry is a directory (symlinks are followed).
+    bool   is_exec;  // True if the entry is a non-directory file executable by the owner.
+};
+
+struct ListdirResult
+// Result of PathX::listdir.
+{
+    Vector<DirEntry> entries;            // Matched entries (directories first, then files).
+    bool             truncated = false;  // True if the listing was stopped before the end.
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // Class definitions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class PathX : public std::filesystem::path
+class PathX : public Path
 {
     public:
 
@@ -35,15 +55,15 @@ class PathX : public std::filesystem::path
         // Member functions
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        Vector<String> listdir(uint32_t n_max_items = 128) const;
-        // Returns a list of names of the entries in the given directory path.
-        // The list is sorted in ascending order.
+        ListdirResult listdir(StringView prefix = "") const;
+        // Returns the entries in this directory whose names start with the given prefix.
+        // Hidden entries are listed only if the prefix starts with a dot.
         //
         // [Args]
-        //   n_max_items (uint32_t): [IN] The maximum number of items to be listed.
+        //   prefix (StringView): [IN] Prefix of the entry names to be listed.
         //
         // [Returns]
-        //   (Vector<string>): List of names of the entries.
+        //   (ListdirResult): Matched entries and the truncation flag.
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

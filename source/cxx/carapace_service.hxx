@@ -9,6 +9,7 @@
 #define CARAPACE_SERVICE_HXX
 
 // Include the headers of custom modules.
+#include "config.hxx"
 #include "dtypes.hxx"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -23,9 +24,11 @@ class CarapaceService
         // Constructors and destructors
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-         CarapaceService(void);
+        explicit CarapaceService(const RedAlienConfig& cfg);
+        // Constructor for the CarapaceService class.
+
         ~CarapaceService(void);
-        // Constructor and destructor for the CarapaceService class.
+        // Destructor for the CarapaceService class.
 
         // NOTE: This class should be non-copyable and non-movable.
         CarapaceService(const CarapaceService&)              = delete;
@@ -37,14 +40,14 @@ class CarapaceService
         // Member functions
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        Generator<Pair<StringView, StringView>> complete(const Vector<StringView>& tokens);
+        Generator<Tuple<StringView, StringView, const char*>> complete(const Vector<StringView>& tokens);
         // Returns a list of completion candidates for the given command-line string.
         //
         // [Args]
         //   tokens (const Vector<StringView>&): [IN] The parsed tokens of the user input.
         //
         // [Returns]
-        //   (Generator<Pair<String, String>>): A vector of matching completion strings and their descriptions.
+        //   (Generator<Tuple<StringView, StringView, const char*>>): A generator that yields tuples of (candidate, description, color_code).
 
     private:
 
@@ -52,8 +55,27 @@ class CarapaceService
         // Private member variables
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        Map<uint64_t, Vector<Pair<String, String>>> cache;
+        Map<uint64_t, Vector<Tuple<String, String, const char*>>> cache;
         // Cache for storing previously computed completion results.
+
+        Path path_carapace_bin;
+        // Path to the "carapace" binary executable.
+
+        const StringMap& colors;
+        // Reference to the color configuration map.
+
+        ////////////////////////////////////////////////////////////////////////////////////////////
+        // Private member functions
+        ////////////////////////////////////////////////////////////////////////////////////////////
+
+        const char* get_color(StringView style) const;
+        // Returns the color code for the given style string.
+        //
+        // [Args]
+        //   style (StringView): [IN] The style string returned from the "carapace".
+        //
+        // [Returns]
+        //   (const char*): The color code corresponding to the given style string.
 };
 
 #endif

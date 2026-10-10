@@ -82,7 +82,6 @@ class CursesScreen
         //   y    (int32_t) : [IN] The Y coordinate to start drawing (relative to win).
         //   x    (int32_t) : [IN] The X coordinate to start drawing (relative to win).
         //   w    (int32_t) : [IN] The width of the line to draw.
-        //   attr (int32_t) : [IN] The attribute to apply to the line (e.g., A_BOLD, A_REVERSE, COLOR_PAIR(n)).
 
         void line_v(int32_t y, int32_t x, int32_t h);
         // Draw a vertical line with the specified attribute.
@@ -91,7 +90,6 @@ class CursesScreen
         //   y    (int32_t) : [IN] The Y coordinate to start drawing (relative to win).
         //   x    (int32_t) : [IN] The X coordinate to start drawing (relative to win).
         //   h    (int32_t) : [IN] The height of the line to draw.
-        //   attr (int32_t) : [IN] The attribute to apply to the line (e.g., A_BOLD, A_REVERSE, COLOR_PAIR(n)).
 
         void rectbox(int32_t y, int32_t x, int32_t h, int32_t w);
         // Draw a box border around the specified rectangle.

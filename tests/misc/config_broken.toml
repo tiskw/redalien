@@ -11,4 +11,4 @@ area_height = 8
 # Length of mergin in the column display.
 column_margin = 3
 
-# vim: expandtab shiftwidth=4 shiftwidth=4
+# vim: expandtab tabstop=4 shiftwidth=4

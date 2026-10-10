@@ -31,6 +31,29 @@ String expand_tilde(StringView path)
 
 }   // }}}
 
+Path get_executable_path(void)
+{   // {{{
+
+    Vector<char> buf(512);
+
+    while (true)
+    {
+        // Read the symbolic link "/proc/self/exe" to get the path of the current executable.
+        SignedSizeType len = readlink("/proc/self/exe", buf.data(), buf.size());
+
+        // If the readlink() call fails, return an empty path.
+        if (len < 0) return Path("");
+
+        // If the buffer is large enough to hold the path, return the path as a Path object.
+        if (static_cast<SizeType>(len) < buf.size())
+            return Path(String(buf.data(), len));
+
+        // Otherwise, the buffer is too small, so double its size and try again.
+        buf.resize(buf.size() * 2);
+    }
+
+}   // }}}
+
 Size get_terminal_size(void) noexcept
 {   // {{{
 
@@ -96,7 +119,7 @@ String replace(StringView target, StringView oldstr, StringView newstr) noexcept
 
     // Find the old string in the target string.
     SizeType pos = replaced.find(oldstr);
- 
+
     while (pos != String::npos)
     {
         // Replace the old string to the new string.

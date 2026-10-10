@@ -26,14 +26,17 @@ enum RunCommandOption : uint8_t
 // Public functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-String run_command(StringView                command,    RunCommandOption option = RUN_COMMAND_PLAIN);
-String run_command(const Vector<String>&     cmd_tokens, RunCommandOption option = RUN_COMMAND_PLAIN);
-String run_command(const Vector<StringView>& cmd_tokens, RunCommandOption option = RUN_COMMAND_PLAIN);
+String run_command(StringView                command,    RunCommandOption option = RUN_COMMAND_PLAIN, String* err_out = nullptr);
+String run_command(const Vector<String>&     cmd_tokens, RunCommandOption option = RUN_COMMAND_PLAIN, String* err_out = nullptr);
+String run_command(const Vector<StringView>& cmd_tokens, RunCommandOption option = RUN_COMMAND_PLAIN, String* err_out = nullptr);
 // Run a external command and get the returned value as a string.
+// The "err_out" is an optional pointer to a string to store the error output of the command.
+// If "err_out" is nullptr, the error output will be discarded.
 //
 // [Args]
-//   cmd_tokens   (const Vector<String*>&): [IN] Command and its arguments to run.
-//   option       (RunCommandOption)      : [IN] Options for running the command.
+//   cmd_tokens   (const Vector<String>&): [IN] Command and its arguments to run.
+//   option       (RunCommandOption)     : [IN] Options for running the command.
+//   err_out      (String*)              : [OUT] Pointer to a string to store the error output.
 //
 // [Returns]
 //   (String): Return value of the external command.

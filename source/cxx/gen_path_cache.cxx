@@ -16,11 +16,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int32_t generate_path_commands_cache(void)
-// Print all commands in PATH environment variable.
-//
-// [Returns]
-//   (int): EXIT_SUCCESS if no error occurred.
-//
 {   // {{{
 
     // Get the "PATH" environment variable, and return failure if it is not set.
@@ -52,12 +47,6 @@ int32_t generate_path_commands_cache(void)
             // Get file extension with lower case.
             String ext = entry.path().extension().string();
             std::transform(ext.begin(), ext.end(), ext.begin(), [](char c){return std::tolower(static_cast<unsigned char>(c));});
-
-            // Skip files of specified extensions.
-            if ((ext == ".dat" ) or (ext == ".dll") or (ext == ".exe") or (ext == ".ini" ) or (ext == ".jpg")
-             or (ext == ".json") or (ext == ".log") or (ext == ".mof") or (ext == ".nls" ) or (ext == ".so" )
-             or (ext == ".png" ) or (ext == ".txt") or (ext == ".xml") or (ext == ".yaml"))
-                continue;
 
             // Skip files of specified extensions.
             static const StringSet exts_exclude = {".dat", ".dll", ".exe", ".ini", ".jpg", ".json", ".log", ".mof", ".nls", ".so", ".png", ".txt",  ".xml", ".yaml"};

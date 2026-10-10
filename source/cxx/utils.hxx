@@ -103,6 +103,13 @@ String expand_tilde(StringView path);
 // [Returns]
 //   (String): Output path.
 
+Path get_executable_path(void);
+// Get the path of the current executable. This function reads the symbolic link
+// "/proc/self/exe" to determine the path of the currently running executable.
+//
+// [Returns]
+//   (Path): Path of the current executable.
+
 Size get_terminal_size(void) noexcept;
 // Get terminal size.
 //
@@ -183,7 +190,7 @@ inline constexpr uint64_t hash(StringView str, uint64_t hash_init = 0xcbf29ce484
 
     return hash;
 
-};  // }}}
+}   // }}}
 
 inline constexpr uint64_t hash(const char* str, uint64_t hash_init = 0xcbf29ce484222325)
 // Compute hash value of the given string.

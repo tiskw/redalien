@@ -17,7 +17,6 @@
 
 // Include the headers of custom modules.
 #include "async_comp.hxx"
-#include "bash_completer.hxx"
 #include "carapace_service.hxx"
 #include "char_x.hxx"
 #include "cmd_runner.hxx"
@@ -168,96 +167,14 @@ static void test_AsyncComp(void)
 
 }   // }}}
 
-static void test_BashCompleter(void)
-{   // {{{
-
-    // Print header.
-    print_header("Unit test for BashCompleter class");
-
-    ////////////////////////////////////////////////////////
-    // Constructor and destructor
-    ////////////////////////////////////////////////////////
-    {
-        // Constructing BashCompleter spawns a bash child process.
-        // Simply constructing and destroying must not throw or crash.
-        BashCompleter bc;
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: git subcommands with prefix
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // "git sta" should produce completions containing "status" and/or "stash".
-        // Note: bash-completion may append a trailing space to each candidate.
-        const Vector<String> results = bc.complete("git sta");
-        bool found_status = false;
-        bool found_stash  = false;
-        for (const String& s : results)
-        {
-            // Match with or without trailing space.
-            if (s == "status" || s == "status ") found_status = true;
-            if (s == "stash"  || s == "stash " ) found_stash  = true;
-        }
-        expect(found_status || found_stash);
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: trailing space returns non-empty list
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // "git " (with trailing space) should return the full list of git subcommands.
-        const Vector<String> results = bc.complete("git ");
-        expect(!results.empty());
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: empty input does not crash
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // An empty string is a degenerate input; complete() must not throw or crash.
-        [[maybe_unused]] const Vector<String> results = bc.complete("");
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: multiple sequential calls on the same object
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // The same BashCompleter instance must handle multiple calls correctly.
-        [[maybe_unused]] const Vector<String> r1 = bc.complete("ls --");
-        [[maybe_unused]] const Vector<String> r2 = bc.complete("git ");
-        [[maybe_unused]] const Vector<String> r3 = bc.complete("echo ");
-
-        // Each call must return a Vector (possibly empty) without crashing.
-        expect(true);
-    }
-
-    ////////////////////////////////////////////////////////
-    // complete: input with single-quote character (shell quoting)
-    ////////////////////////////////////////////////////////
-    {
-        BashCompleter bc;
-
-        // Input that contains a single-quote must be shell-quoted correctly and
-        // must not cause the child bash process to hang or crash.
-        [[maybe_unused]] const Vector<String> results = bc.complete("echo 'hello");
-    }
-
-}   // }}}
-
 static void test_CarapaceService(void)
 {   // {{{
+
     // Print header.
     print_header("Unit test for CarapaceService class");
 
-    CarapaceService service;
+    RedAlienConfig cfg;
+    CarapaceService service(cfg);
 
     ////////////////////////////////////////////////////////
     // Fewer than two tokens: the generator yields nothing
@@ -294,14 +211,14 @@ static void test_CarapaceService(void)
         const Vector<StringView> tokens = {"git", "sta"};
 
         Vector<String> first;
-        for (const auto& [value, display] : service.complete(tokens))
+        for (const auto& [value, display, color_code] : service.complete(tokens))
         {
             (void) display;
             first.emplace_back(value);
         }
 
         Vector<String> second;
-        for (const auto& [value, display] : service.complete(tokens))
+        for (const auto& [value, display, color_code] : service.complete(tokens))
         {
             (void) display;
             second.emplace_back(value);
@@ -385,6 +302,23 @@ static void test_CharX(void)
     CharX cx_null(nullptr, 0);
     expect(cx_null.size() == 0);
     expect(cx_null.printable() == "");
+
+    ////////////////////////////////////////////////////////
+    // parse_printable_char
+    ////////////////////////////////////////////////////////
+
+    expect(CharX::parse_printable_char("^A") == 0x01);
+    expect(CharX::parse_printable_char("^C") == 0x03);
+    expect(CharX::parse_printable_char("^?") == 0x7F);
+    expect(CharX::parse_printable_char("A") == 'A');
+    expect(CharX::parse_printable_char("\\n") == '\n');
+    expect(CharX::parse_printable_char("\\r") == '\r');
+    expect(CharX::parse_printable_char("\\t") == '\t');
+    expect(CharX::parse_printable_char("\\b") == '\b');
+    expect(CharX::parse_printable_char("\\f") == '\f');
+    expect(CharX::parse_printable_char("\\v") == '\v');
+    expect(CharX::parse_printable_char("\\\\") == '\\');
+    expect(CharX::parse_printable_char("あ") == 0x00);
 
 }   // }}}
 
@@ -563,15 +497,6 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // candidate("ls --") → OPTION (>> -.*) → cands_option
-    ////////////////////////////////////////////////////////
-    {
-        EditHelper eh(8, 80, Path("/tmp"), cfg);
-        const Vector<String> lines = eh.candidate("ls --");
-        expect(lines.size() == (size_t) cfg.area_height);
-    }
-
-    ////////////////////////////////////////////////////////
     // candidate("cat Makefile ") → PREVIEW (>> FILE "") → cands_filepath + cands_preview
     ////////////////////////////////////////////////////////
     {
@@ -582,16 +507,7 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // candidate("git ") → SUBCMD+BASHCOMP → cands_subcmd
-    ////////////////////////////////////////////////////////
-    {
-        EditHelper eh(8, 80, Path("/tmp"), cfg);
-        const Vector<String> lines = eh.candidate("git ");
-        expect(lines.size() == (size_t) cfg.area_height);
-    }
-
-    ////////////////////////////////////////////////////////
-    // candidate("apt ") → SUBCMD → cands_subcmd
+    // candidate("apt ") → CARAPACE (>> .*) → cands_carapace
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
@@ -625,15 +541,6 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // candidate("systemctl ") → BASHCOMP (systemctl .*) → cands_bashcomp
-    ////////////////////////////////////////////////////////
-    {
-        EditHelper eh(8, 80, Path("/tmp"), cfg);
-        const Vector<String> lines = eh.candidate("systemctl ");
-        expect(lines.size() == (size_t) cfg.area_height);
-    }
-
-    ////////////////////////////////////////////////////////
     // Cache hit: cache_cands_lhs (same lhs called twice)
     ////////////////////////////////////////////////////////
     {
@@ -644,15 +551,14 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // Cache hit: cache_cands_mat (different lhs, same pattern match)
-    // "git pu" and "git " both match [["git", ".*"], subcmd] with same token hash
+    // Different lhs that match the same completion pattern ([">>", ".*"] → CARAPACE).
+    // Each lhs has its own entry in cache_cands_lhs.
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
-        // "git st" – matching SUBCMD pattern for git, first token "git"
+        // "git st" – CARAPACE completion for the second token.
         [[maybe_unused]] const Vector<String> lines1 = eh.candidate("git st");
-        // "git " – same pattern but different lhs; if hash_mat is the same, cache_cands_mat hits
-        // (This exercises the mat-cache path when different lhs leads to same matched tokens.)
+        // "git " – same pattern but different lhs (a separate cache entry is created).
         [[maybe_unused]] const Vector<String> lines2 = eh.candidate("git ");
         expect(lines1.size() == (size_t) cfg.area_height);
         expect(lines2.size() == (size_t) cfg.area_height);
@@ -696,7 +602,7 @@ static void test_EditHelper(void)
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
-        // "git " → multiple subcmd candidates starting differently
+        // "git " → multiple CARAPACE candidates starting differently
         eh.candidate("git ");
         const String result = eh.complete("git ");
         // Result should not crash and be a string starting with "git "
@@ -727,18 +633,18 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // BASHCOMP: candidate("tar xvf") falls through to bashcomp
+    // CARAPACE: candidate("tar xvf") falls through to the generic carapace entry
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
         // "tar xvf" has no specific entry and the last token "xvf" is non-empty,
-        // non-dash, not an existing file -> matches [[">>", ".*"], "bashcomp", ""].
+        // not an existing file -> matches [[">>", ".*"], "carapace", ""].
         const Vector<String> lines = eh.candidate("tar xvf");
         expect(lines.size() == (size_t) cfg.area_height);
     }
 
     ////////////////////////////////////////////////////////
-    // BASHCOMP: cache_cands_lhs hit on identical input
+    // CARAPACE: cache_cands_lhs hit on identical input
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
@@ -748,9 +654,9 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // BASHCOMP: no cache_cands_mat collision across different commands
+    // CARAPACE: no cache collision across different commands
     // "pip xvf" and "tar xvf" share the same last token but must not share
-    // the mat-cache, so neither call should crash or return wrong data.
+    // the cache entry, so neither call should crash or return wrong data.
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
@@ -804,6 +710,24 @@ static void test_EditHelper(void)
         EditHelper helper(8, 80, Path("/tmp"), cfg);
         const Vector<String> lines = helper.candidate("ls .");
         expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Completion of a file path containing spaces
+    ////////////////////////////////////////////////////////
+    {
+        // Prepare a file whose name contains a space.
+        stdfs::create_directories("/tmp/redalien_q/my dir");
+        std::ofstream("/tmp/redalien_q/my file.txt");
+
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        eh.candidate("ls /tmp/redalien_q/my f");
+        expect(eh.complete("ls /tmp/redalien_q/my f") == "ls '/tmp/redalien_q/my file.txt' ");
+
+        eh.candidate("ls '/tmp/redalien_q/my d");
+        expect(eh.complete("ls '/tmp/redalien_q/my d") == "ls '/tmp/redalien_q/my dir/");
+
+        stdfs::remove_all("/tmp/redalien_q");
     }
 
 }   // }}}
@@ -1220,30 +1144,28 @@ static void test_PathX(void)
     expect(name3 == "");
 
     // Test 5: listdir.
-    expect(PathX("").listdir().size() > 0);
-    expect(PathX("/not_exists").listdir().size() == 0);
-    expect(PathX(".").listdir(1).size() == 1);
+    expect(PathX("").listdir("").entries.size() > 0);
+    expect(PathX("/not_exists").listdir("").entries.size() == 0);
 
     // The contents of the home directory are environment dependent, so only
     // the fact that the call succeeds without throwing is verified here.
-    [[maybe_unused]] const Vector<String> entries = PathX("~").listdir();
+    [[maybe_unused]] const ListdirResult result = PathX("~").listdir("");
 
     // A regular file is not a directory, hence an empty result.
-    expect(PathX("test_main.cxx").listdir().size() == 0);
+    expect(PathX("test_main.cxx").listdir("").entries.size() == 0);
 
     // Directories are listed first and each entry ends with a slash.
     {
-        const Vector<String> entries = PathX(".").listdir();
-        expect(entries.size() > 0);
+        const ListdirResult result = PathX(".").listdir("");
+        expect(result.entries.size() > 0);
 
         // Once a non-directory entry appears, no directory entry may follow.
         bool seen_file  = false;
         bool ordered_ok = true;
-        for (const String& entry : entries)
+        for (const DirEntry& entry : result.entries)
         {
-            const bool is_dir = (entry.size() > 0) and (entry.back() == '/');
-            if (is_dir and seen_file) ordered_ok = false;
-            if (not is_dir)           seen_file  = true;
+            if (entry.is_dir and seen_file) ordered_ok = false;
+            if (not entry.is_dir)           seen_file  = true;
         }
         expect(ordered_ok);
     }
@@ -1265,7 +1187,7 @@ static void test_preview(void)
     print_header("Unit test for preview function");
 
     // An empty previews map is passed to use the default preview behavior.
-    StrVecMap previews;
+    StringMap previews;
 
     // Test 1: preview non-existing file returns empty result.
     expect(preview("/unexisting_file", 100, previews).size() == 0);
@@ -1275,9 +1197,9 @@ static void test_preview(void)
 
     // User-defined preview command ({path} is replaced by the target path)
     {
-        const StrVecMap previews = {
-            {"inode/directory", {"ls",   "{path}"}},
-            {"text/*",          {"echo", "{path}"}},
+        const StringMap previews = {
+            {"inode/directory", "ls {path}"},
+            {"text/*",          "echo {path}"},
         };
 
         // Text file: the output of the user command is returned line by line.
@@ -1294,7 +1216,7 @@ static void test_preview(void)
 
     // Default preview: no matching command is registered
     {
-        const StrVecMap previews;
+        const StringMap previews;
 
         // A text file is read directly (up to the first 1 KiB).
         const Vector<String> lines = preview("Makefile", 5, previews);
@@ -1312,7 +1234,7 @@ static void test_preview(void)
             ofs.write("\x89PNG\r\n\x1A\n", 8);
         }
 
-        const StrVecMap previews;
+        const StringMap previews;
         const Vector<String> lines = preview(path_bin, 5, previews);
         expect(lines.size() > 0);
 
@@ -1327,8 +1249,8 @@ static void test_preview(void)
 
     // A preview command that produces no output yields an empty result
     {
-        const StrVecMap previews = {
-            {"text/*", {"true"}}
+        const StringMap previews = {
+            {"text/*", "true"}
         };
         expect(preview("Makefile", 5, previews).size() == 0);
     }
@@ -1347,8 +1269,9 @@ static void test_RedAlienConfig(void)
     // Path to temporary config file used for testing.
     const char* path_cfg = "/tmp/redalien_test_config_ext.toml";
 
-    // Write a config file that covers every completion type, every malformed-entry
-    // branch, and the range checks applied after parsing.
+    // Write a config file that covers every supported completion type, unknown (or removed)
+    // completion types that fall back to "path", every malformed-entry branch, and the range
+    // checks applied after parsing.
     {
         std::ofstream ofs(path_cfg);
         ofs << R"TOML(
@@ -1358,15 +1281,18 @@ column_padding = 3
 undefined_key  = "this entry name does not exist"
 
 [PROMPT]
-ps0l = "L"
-ps0r = "R"
-ps1i = "i"
-ps1n = "n"
-ps2  = "2"
+ps1i  = "i"
+ps1n  = "n"
+ps2   = "2"
+ps_ex = "ex"
 undefined_prompt_key = "x"
 
 [KEYBIND]
-"^X" = "echo keybind"
+candidate_completion_key = "^I"
+history_completion_key = "^E"
+plugin_trigger_keys = [
+    ["^X", "echo keybind"],
+]
 
 [COMPLETION]
 completions = [
@@ -1387,9 +1313,9 @@ completions = [
 
 [PREVIEW]
 previews = [
-    ["text/*", ["cat", "{path}"]],
+    ["text/*", "cat {path}"],
     ["this entry has too few items"],
-    ["text/plain", "this entry is not an array"],
+    ["text/plain", ["this entry is", "not a string"]],
 ]
 preview_delim = " | "
 preview_ratio = 2.0
@@ -1413,12 +1339,11 @@ some_key = 1
     ////////////////////////////////////////////////////////
     // Prompt strings and keybinds
     ////////////////////////////////////////////////////////
-    expect(cfg.ps0l == "L");
-    expect(cfg.ps0r == "R");
-    expect(cfg.ps1i == "i");
-    expect(cfg.ps1n == "n");
-    expect(cfg.ps2  == "2");
-    expect(cfg.keybinds.contains("^X"));
+    expect(cfg.ps1i  == "i");
+    expect(cfg.ps1n  == "n");
+    expect(cfg.ps2   == "2");
+    expect(cfg.ps_ex == "ex");
+    expect(cfg.plugin_trigger_keys.contains("^X"));
 
     ////////////////////////////////////////////////////////
     // Completion entries: only the eleven well-formed entries are registered
@@ -1672,7 +1597,7 @@ static void test_TermUserIF_pty(void)
         }
 
         ////////////////////////////////////////////////////////
-        // getch() with wakeup_fd set but only stdin fires (lines 131-132)
+        // getch() with wakeup_fd set but only stdin fires
         // Passing a valid wakeup_fd exercises the FD_SET(wakeup_fd) branch.
         ////////////////////////////////////////////////////////
         {
@@ -1687,7 +1612,7 @@ static void test_TermUserIF_pty(void)
         }
 
         ////////////////////////////////////////////////////////
-        // getch() with wakeup_fd fires but no stdin data (lines 145-150)
+        // getch() with wakeup_fd fires but no stdin data
         // When only the wakeup pipe fires, getch() drains it and returns empty.
         ////////////////////////////////////////////////////////
         {
@@ -3309,7 +3234,7 @@ static void test_readcmd(void)
 
     // History completions.
     expect(run_test_readcmd("previ\x05\n", "previous input2 ", ""));
-    expect(run_test_readcmd("previous input1\x05\n", "previous input1 ", ""));
+    expect(run_test_readcmd("previous input1\x05\n", "previous input1", ""));
 
     // Test the stop key.
     expect(run_test_readcmd("\x06\n", "^F", ""));
@@ -3370,44 +3295,46 @@ static void test_main_redalien(void)
         return;
     }
 
-    std::remove("/tmp/redalien.out");
+    const Path path_cmnd_info = Path("/tmp/redalien_test/cmnd_info.txt");
+    const Path path_bash_info = Path("/tmp/redalien_test/bash_info.txt");
+    std::ofstream ofs1(path_cmnd_info);
+    ofs1 << "cat" << std::endl;
+    ofs1 << "ls"  << std::endl;
+    ofs1.close();
+    std::ofstream ofs2(path_bash_info);
+    ofs2 << "alias" << std::endl;
+    ofs2.close();
+
+    std::remove("/tmp/redalien_test/redalien.out");
 
     const char* argv0[] = {"redalien", "--outdir", "/tmp"};
     main_redalien(3, const_cast<char**>(argv0), "\x14""exit\n");
-    std::ofstream("/tmp/redalien.out");
+    std::ofstream("/tmp/redalien_test/redalien.out");
     main_redalien(3, const_cast<char**>(argv0), "\x14""exit\n");
 
-    std::remove("/tmp/redalien.out");
+    std::remove("/tmp/redalien_test/redalien.out");
 
-    const char* argv1[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
+    const char* argv1[] = {"redalien", "--outdir", "/tmp/redalien_test", "--config", "misc/config.toml"};
     main_redalien(5, const_cast<char**>(argv1), "exit\n");
-
-    const char* argv6[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
-    main_redalien(5, const_cast<char**>(argv6), "\x05\n");
-
-    // Test the run_keybind path: ^F is a stop key bound to an external command.
-    // The keybind command (filechooser) likely does not exist in the test environment,
-    // so run_keybind will fail to open the plugin output file and fall back gracefully.
-    // The subsequent Enter key causes main_redalien to exit normally.
-    const char* argv7[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
-    main_redalien(5, const_cast<char**>(argv7), "\x06\n");
+    main_redalien(5, const_cast<char**>(argv1), "ls misc/config.toml \n");
+    main_redalien(5, const_cast<char**>(argv1), "\x05\n"); // Ctrl-E
+    main_redalien(5, const_cast<char**>(argv1), "\x06\n"); // Ctrl-F
 
     // Same test but with a mock plugin output file present, so run_keybind can read it.
     {
         std::ofstream ofs("/tmp/plugin.out");
         ofs << "left_part\nright_part\n";
     }
-    const char* argv8[] = {"redalien", "--outdir", "/tmp", "--config", "misc/config.toml"};
-    main_redalien(5, const_cast<char**>(argv8), "\x06\n");
+    main_redalien(5, const_cast<char**>(argv1), "\x06\n");
     std::remove("/dev/shm/redalien/plugin.out");
 
     // Test the --help option.
-    const char* argv9[] = {"redalien", "--help"};
-    main_redalien(2, const_cast<char**>(argv9), "");
+    const char* argv2[] = {"redalien", "--help"};
+    main_redalien(2, const_cast<char**>(argv2), "");
 
     // Test invalid outdir.
-    const char* argv10[] = {"redalien", "--outdir", "/non_existent_dir"};
-    main_redalien(3, const_cast<char**>(argv10), "");
+    const char* argv3[] = {"redalien", "--outdir", "/non_existent_dir"};
+    main_redalien(3, const_cast<char**>(argv3), "");
 
 }   // }}}
 
@@ -3418,9 +3345,13 @@ static void test_main_redalien(void)
 int main(void)
 {   // {{{
 
+    // Make a temporary directory with permission 0700.
+    const Path tmp_dir = "/tmp/redalien_test";
+    std::filesystem::create_directory(tmp_dir);
+    std::filesystem::permissions(tmp_dir, std::filesystem::perms::owner_all);
+
     // Run all unit test functions.
     test_AsyncComp();
-    test_BashCompleter();
     test_CarapaceService();
     test_CharX();
     test_CmdRunner();

@@ -95,7 +95,7 @@ function __redalien_select_existing_file__ ()
         fi
     done
 
-    # Otherwise, print an error message and exit this function.
+    # Otherwise, return "-" to indicate that no file exists.
     echo "-"
     return 0
 
@@ -107,7 +107,7 @@ __REDALIEN_CONFIG_FILES__=(
     "${__REDALIEN_INSTALL_DIR__}/default/config.toml"
 )
 
-# Select the bashrc and config files to load.
+# Select the config file to load.
 __REDALIEN_CONFIG_PATH__=$(__redalien_select_existing_file__ "${__REDALIEN_CONFIG_FILES__[@]}")
 
 #---------------------------------------------------------------------------------------------------
@@ -192,7 +192,7 @@ function __redalien_call__ ()
 
     # Inherit the editing mode from the current shell's settings.
     local editor="emacs"
-    [[ ! -z "$(set -o | grep '^vi ' | grep 'on')" ]] && editor="vi"
+    [[ -o vi ]] && editor="vi"
 
     # Call redalien with the provided input and output file.
     if ! ${__REDALIEN_BINARY__} -c "${__REDALIEN_CONFIG_PATH__}" -e "${editor}" -o "${__REDALIEN_OUTDIR__}" -i "${1}"; then
@@ -225,6 +225,11 @@ function __redalien_dsr_kick__ ()
 {   # {{{
 
     __redalien_dsr_pending__=1
+
+    # Disable echo before sending DSR.
+    # This will be restored on PS0 (see __redalien_enable_dsr__).
+    stty -echo </dev/tty 2>/dev/null
+
     printf '\e[5n' > /dev/tty;
 
 }   # }}}
@@ -252,11 +257,49 @@ function __redalien_enable_dsr__ ()
     # Setup PROMPT_COMMAND to kick DSR key before each prompt.
     PROMPT_COMMAND="__redalien_dsr_kick__${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 
+    # Restore echo just before each command is executed using PS0.
+    __REDALIEN_ORIG_PS0__="${PS0}"
+    PS0='$(stty echo </dev/tty 2>/dev/null)'"${PS0}"
+
 }   # }}}
 
 #---------------------------------------------------------------------------------------------------
 # Setup and cleanup functions for RedAlien integration
 #---------------------------------------------------------------------------------------------------
+
+function __redalien_make_outdir__ ()
+{   # {{{
+
+    # Select a directory to store RedAlien's output files (e.g., redalien.out) that is owned by
+    # the current user and is not a symlink, and set its permission to 700. The candidates are:
+    #   - ${XDG_RUNTIME_DIR}/redalien
+    #   - /dev/shm/redalien-${UID}
+    #   - /tmp/redalien-${UID}
+
+    # Define the candidate directories.
+    local candidates=(
+        "${XDG_RUNTIME_DIR:-/dev/null}/redalien"
+        "/dev/shm/redalien-$(id -u)"
+        "/tmp/redalien-$(id -u)"
+    )
+
+    # Check each candidate directory and return the first one that is valid.
+    for dir in "${candidates[@]}"; do
+
+        mkdir -p -m 700 "${dir}" 2>/dev/null
+
+        if [ -d "${dir}" ] && [ ! -L "${dir}" ] && [ "$(stat -c %u "${dir}")" -eq "$(id -u)" ]; then
+            chmod 700 "${dir}" 2>/dev/null || continue
+            echo "${dir}"
+            return 0
+        fi
+    done
+
+    # If none of the candidates are valid, print an error message and exit with status 1.
+    echo "RedAlien: ERROR: Failed to create output directory in /tmp or /dev/shm." >&2
+    exit 1
+
+}   # }}}
 
 function __redalien_setup__ ()
 # Setup RedAlien in the current shell.
@@ -267,16 +310,9 @@ function __redalien_setup__ ()
 {   # {{{
 
     # Create a output directory for RedAlien to store its output files.
-    local tmpdir_rom="/tmp/redalien-$(id -u)"
-    local tmpdir_ram="/dev/shm/redalien-$(id -u)"
-    if   [ -d /dev/shm ] && mkdir -p ${tmpdir_ram}; then __REDALIEN_OUTDIR__="${tmpdir_ram}";
-    elif [ -d /tmp     ] && mkdir -p ${tmpdir_rom}; then __REDALIEN_OUTDIR__="${tmpdir_rom}";
-    else
-        printf 'RedAlien: ERROR: Failed to create output directory in /tmp or /dev/shm.\n' >&2
-        return 1
-    fi
+    __REDALIEN_OUTDIR__=$(__redalien_make_outdir__)
 
-    # Do nothing if redalien_readcmd is not found.
+    # Do nothing if redalien is not found.
     command -v "${__REDALIEN_BINARY__}" >/dev/null 2>&1 || return 0
 
     # Generate the command cache for redalien if not exists.
@@ -290,14 +326,6 @@ function __redalien_setup__ ()
 
     # Enables the DSR trigger of RedAlien.
     __redalien_enable_dsr__
-
-    # Store the original prompt strings to restore later.
-    __REDALIEN_ORIG_PS1__="${PS1}"
-    __REDALIEN_ORIG_PS2__="${PS2}"
-
-    # Minimize the prompt string to avoid double printing of the prompt.
-    PS1=''
-    PS2=''
 
     # Set the flag to indicate that RedAlien is active.
     export REDALIEN_ACTIVE=1
@@ -313,15 +341,15 @@ function __redalien_cleanup__ ()
 {   # {{{
 
     # Remove the key bindings.
-    bind -r "\e[0n"               2>/dev/null
-    bind -r "${__REDALIEN_RELAY__}" 2>/dev/null
-
-    # Restore the original prompt strings.
-    PS1="${__REDALIEN_ORIG_PS1__}"
-    PS2="${__REDALIEN_ORIG_PS2__}"
+    bind -r "\e[0n"                   2>/dev/null
+    bind -r "${__REDALIEN_TRIGGER__}" 2>/dev/null
 
     # Restore the original PROMPT_COMMAND.
     PROMPT_COMMAND="${__REDALIEN_ORIG_PROMPT_COMMAND__}"
+
+    # Restore the original PS0, and restore echo for just in case.
+    PS0="${__REDALIEN_ORIG_PS0__}"
+    stty echo </dev/tty 2>/dev/null
 
     # Remove the temporary directories.
     rm -fr "${__REDALIEN_OUTDIR__}"

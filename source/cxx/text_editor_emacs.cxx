@@ -18,7 +18,7 @@
 // Unnamed namespace for making classes and functions file-local.
 namespace
 {
-    // Bring TextEditor's protected types and utilities into scope so that the word-motion
+    // Bring TextEditor's public types and utilities into scope so that the word-motion
     // helper functions below can use them without qualification.
     using CharClass = TextEditor::CharClass;
     using CharInfo  = TextEditor::CharInfo;
@@ -78,7 +78,7 @@ namespace
         // If the input string is empty, there are no characters to skip, so return 0.
         if (lhs.empty()) return 0;
 
-        // Get the character info vector for rhs, and if it's empty, return 0.
+        // Get the character info vector for lhs, and if it's empty, return 0.
         const Vector<CharInfo> chars = TextEditor::collect_char_info(lhs);
         if (chars.empty()) return 0;
 

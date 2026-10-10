@@ -1,9 +1,9 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-/// C++ header file: window.hxx                                                                  ///
+/// C++ header file: grid_window.hxx                                                             ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef WINDOW_HXX
-#define WINDOW_HXX
+#ifndef GRID_WINDOW_HXX
+#define GRID_WINDOW_HXX
 
 // Include custom headers.
 #include "cui.hxx"
@@ -76,7 +76,7 @@ class GridWindow
         // The CursesScreen object for handling ncurses drawing and input.
 
         bool has_grep_win;
-        // Flags indicating whether the grep window and preview window are currently displayed.
+        // Flag indicating whether the grep window is currently displayed.
 
         String grep_str;
         // Current grep filter string.

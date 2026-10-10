@@ -2,7 +2,7 @@
 # Makefile
 ################################################################################
 
-.PHONY: build-amd64 build-arm64 redalien plugins release test check count clean help
+.PHONY: build-amd64 build-arm64 release-amd64 release-arm64 redalien plugins carapace-bin release test debug install check count clean concat help
 
 #-------------------------------------------------------------------------------
 # Compile settings
@@ -11,7 +11,7 @@
 # Software name.
 REDALIEN_PATH := build/redalien
 
-# Version number (extracted from source/bash/redalien_body).
+# Version number (extracted from source/cxx/main_redalien.hxx).
 VERSION := $(shell grep 'VERSION = "' source/cxx/main_redalien.hxx | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
 
 # Object directory.
@@ -25,7 +25,7 @@ OBJ_FILES := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/%,$(CXX_FILES:.cxx=.o))
 
 # Compile command.
 CC     := g++ -std=c++23
-CFLAGS := -O3 -march=native -flto=auto -Wall -Wextra -I/usr/local/include
+CFLAGS := -O3 -flto=auto -Wall -Wextra -I/usr/local/include
 LIBS   := -L/usr/local/lib
 
 # Commands for Docker-based static build.
@@ -33,6 +33,9 @@ DOCKER_IMAGE := tiskw/redalien:alpine3.23
 DOCKER_BASE  := run --rm -it -u `id -u`:`id -g` -v `pwd`:/work -w /work
 DOCKER_AMD64 := $(DOCKER_BASE) --platform linux/amd64 $(DOCKER_IMAGE)_amd64
 DOCKER_ARM64 := $(DOCKER_BASE) --platform linux/arm64 $(DOCKER_IMAGE)_arm64
+
+# Detect the architecture of the host machine.
+ARCH := $(shell sh utils/get_arch.sh)
 
 # Colors.
 RED     := \033[38;2;204;102;102m
@@ -53,20 +56,21 @@ help:
 	@echo "    make <command>"
 	@echo ""
 	@echo "Build commands:"
-	@echo "    build      Build RedAlien"
-	@echo "    plugins    Build all plugins"
-	@echo "    release    Create a release package"
+	@echo "    build-amd64      Build RedAlien for AMD64 architecture"
+	@echo "    build-arm64      Build RedAlien for ARM64 architecture"
+	@echo "    release-amd64    Create a release package"
+	@echo "    release-arm64    Create a release package"
 	@echo ""
 	@echo "Test commands:"
-	@echo "    test       Run tests and measure code coverage"
+	@echo "    test             Run tests and measure code coverage"
 	@echo ""
 	@echo "Code check commands:"
-	@echo "    check      Check the code quality"
-	@echo "    count      Count the lines of code"
+	@echo "    check            Check the code quality"
+	@echo "    count            Count the lines of code"
 	@echo ""
 	@echo "Other commands:"
-	@echo "    clean      Cleanup cache files"
-	@echo "    help       Show this message"
+	@echo "    clean            Cleanup cache files"
+	@echo "    help             Show this message"
 
 #-------------------------------------------------------------------------------
 # Build commands (outside Docker container)
@@ -128,11 +132,17 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cxx $(SRC_DIR)/%.hxx
 plugins:
 	cd plugins && make build
 
+carapace-bin:
+	cd downloads && make carapace-bin-$(ARCH).tar.gz
+	mkdir -p release/redalien/bin
+	tar -xzf downloads/carapace-bin-$(ARCH).tar.gz -C release/redalien/bin
+	rm -f release/redalien/bin/LICENSE release/redalien/bin/README.md
+
 release:
-	make redalien plugins
 	mkdir -p release/redalien/bin
 	mkdir -p release/redalien/default
 	mkdir -p release/redalien/plugins
+	make redalien plugins carapace-bin
 	cp build/redalien release/redalien/bin
 	cp source/bash/redalien-integration.bash release/redalien/bin
 	cp default/* release/redalien/default
@@ -150,6 +160,10 @@ test:
 
 debug:
 	cd tests; make debug
+
+install:
+	rm -rf ~/.local/share/redalien
+	cat release/redalien_$(shell uname -m).tar.gz | tar xz -C ~/.local/share
 
 #-------------------------------------------------------------------------------
 # Code check commands
@@ -174,5 +188,8 @@ clean:
 
 concat:
 	python3 utils/concatenate_source_files.py > redalien_source_concatenated.txt
+
+find_extra_whitespaces:
+	grep -rnE '[[:blank:]]+$$' source tests plugins
 
 # vim: noexpandtab tabstop=4 shiftwidth=4

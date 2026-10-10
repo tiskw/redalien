@@ -45,7 +45,7 @@ int32_t print_errmsg(const char (&etype)[], const char (&filename)[], int32_t li
 //   etype     (const char&[]): [IN] Error type.
 //   filename  (const char&[]): [IN] File name where the error occurred.
 //   line_no   (int32_t)      : [IN] Line number where the error occurred.
-//   funcname  (const char&[]): [IN] Function name number where the error occurred.
+//   func_name (const char&[]): [IN] Function name where the error occurred.
 //   msg       (StringView)   : [IN] Error message to show.
 //   terminate (bool)         : [IN] Terminate the software if true.
 //

@@ -55,10 +55,8 @@ test:
 	docker $(DOCKER_ARGS) 'make -j4 test_inside_docker'
 
 test_inside_docker:
-	# make test_main test_model test_strextra test_utils
 	make test_main test_strextra test_utils
 	sh test_main.sh
-	# ./test_model
 	./test_strextra
 	./test_utils
 	lcov --quiet --ignore-errors corrupt,gcov,gcov,inconsistent,range --gcov-tool gcov -c -d . -o lcov.info
@@ -67,9 +65,6 @@ test_inside_docker:
 
 test_main:
 	$(CC) $(CFLAGS) $(COVOPTS) -o $(@) $(CXX_TEST_MAIN) $(LIBS)
-
-test_model:
-	$(CC) $(CFLAGS) $(COVOPTS) -o $(@) $(@).cxx $(CXX_TEST_MODEL) $(LIBS)
 
 test_strextra:
 	$(CC) $(CFLAGS) $(COVOPTS) -o $(@) $(@).cxx $(CXX_TEST_STREXTRA) $(LIBS)

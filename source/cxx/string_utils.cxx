@@ -43,7 +43,7 @@ namespace
 Generator<StringView> chunk(StringView sv, uint16_t width)
 {   // {{{
 
-    // Edge cases: the given width is zero, or the colorized string has zero width.
+    // Edge cases: the given width is zero.
     if (width == 0) { co_yield sv; co_return; }
 
     // A variable to store the starting index of the current chunk.
@@ -91,7 +91,7 @@ Generator<StringView> chunk(StringView sv, uint16_t width)
 StringView textclip(StringView sv, uint16_t width)
 {   // {{{
 
-    // Edge cases: the given width is zero, or the colorized string has zero width.
+    // Edge cases: the given width is zero.
     if (width == 0) return sv;
 
     // Initialize the total width of the clipped string.

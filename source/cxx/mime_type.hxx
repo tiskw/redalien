@@ -16,7 +16,7 @@
 
 class MimeType
 // This class determines mime type from suffix of a file using `/usr/share/mime/globs`
-// in which matching of suffixes and mime types are written. In the constructor of FileType,
+// in which matching of suffixes and mime types are written. In the constructor of this class,
 // the file "/usr/share/mime/globs" will be parsed and the matching information is stored
 // to member variables. The file "/usr/share/mime/globs2" contains more rich information,
 // but "globs" is simpler and easy to use.
