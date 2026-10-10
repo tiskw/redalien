@@ -63,17 +63,7 @@ class PathX : public Path
         //   prefix (StringView): [IN] Prefix of the entry names to be listed.
         //
         // [Returns]
-        //   (ListDirResult): Matched entries and the truncation flag.
-
-        // Vector<String> listdir(uint32_t n_max_items = 128) const;
-        // Returns a list of names of the entries in the given directory path.
-        // The list is sorted in ascending order.
-        //
-        // [Args]
-        //   n_max_items (uint32_t): [IN] The maximum number of items to be listed.
-        //
-        // [Returns]
-        //   (Vector<string>): List of names of the entries.
+        //   (ListdirResult): Matched entries and the truncation flag.
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

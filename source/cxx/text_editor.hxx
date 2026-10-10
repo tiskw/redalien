@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// C++ header file: text_editor.hxx                                                             ///
 ///                                                                                              ///
-/// This file defines the class `TextBuffer` that manages user command editing.                  ///
+/// This file defines the class `TextEditor` that manages user command editing.                  ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef TEXT_EDITOR_HXX
@@ -41,7 +41,7 @@ class TextEditor
 
         enum class Mode
         // Constants to represent state of buffer.
-        // In the case of Emacs-style editor, there are two modes: insert mode and normal mode.
+        // In the case of Vi-style editor, there are two modes: insert mode and normal mode.
         {
             INSERT,  // Insert mode: new characters are inserted at the cursor position.
             NORMAL,  // Normal mode: keystrokes are interpreted as commands to manipulate the text buffer.

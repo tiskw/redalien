@@ -54,6 +54,7 @@ namespace
             // Read the first `bytes_to_read` bytes from the file into a buffer.
             String buffer(bytes_to_read, '\0');
             ifs.read(buffer.data(), bytes_to_read);
+            buffer.resize(ifs.gcount());
             return buffer;
         }
 

@@ -95,13 +95,13 @@ class GapBuffer
         // Delete n characters before the cursor position.
         //
         // [Args]
-        //   n (SizeType): [IN] Number of characters to be deleted.
+        //   n (PtrDiff): [IN] Number of characters to be deleted.
 
         void deletekey(PtrDiff n);
         // Delete n characters after the cursor position.
         //
         // [Args]
-        //   n (SizeType): [IN] Number of characters to be deleted.
+        //   n (PtrDiff): [IN] Number of characters to be deleted.
 
         void erase(void);
         // Erase all characters in the buffer.
@@ -116,14 +116,14 @@ class GapBuffer
         // Insert a character at the cursor position and move the cursor forward.
         //
         // [Args]
-        //   str  (const CharX&): [IN] String to be inserted.
-        //   size (SizeType)    : [IN] Size of the input string.
+        //   str  (const char*): [IN] String to be inserted.
+        //   size (SizeType)   : [IN] Size of the input string.
 
         void insert(StringView str);
         // Insert a string at the cursor position and move the cursor forward.
         //
         // [Args]
-        //   str (StringX&): [IN] String to be inserted.
+        //   str (StringView): [IN] String to be inserted.
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Cursor movement functions

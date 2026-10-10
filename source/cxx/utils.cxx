@@ -119,7 +119,7 @@ String replace(StringView target, StringView oldstr, StringView newstr) noexcept
 
     // Find the old string in the target string.
     SizeType pos = replaced.find(oldstr);
- 
+
     while (pos != String::npos)
     {
         // Replace the old string to the new string.

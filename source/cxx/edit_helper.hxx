@@ -8,9 +8,6 @@
 #ifndef EDIT_HELPER_HXX
 #define EDIT_HELPER_HXX
 
-// Include STL headers.
-#include <future>
-
 // Include the headers of custom modules.
 #include "carapace_service.hxx"
 #include "config.hxx"
@@ -76,14 +73,15 @@ class EditHelper
         // Cache of available command names.
 
         CandCacheMap cache_cands_lhs;
-        // Cache of completion candidates, where the key is the hash value of the left-hand-side
-        // string of the completion target.
+        // Cache of completion candidates, where the key is the left-hand-side string
+        // of the user input, and the value is a pair of candidates and lines.
 
         Vector<Pair<String, String>>* cands = nullptr;
         // Completion candidates. This is a pointer to the instance on cache_cands_lhs.
 
         Vector<String>* lines = nullptr;
-        // Completion lines. This is a pointer to the instance on cache_cands_lhs.
+        // Completion lines. This is a pointer to the instance on cache_cands_lhs,
+        // or a pointer to none_cache_entry.lines if there is no cache entry.
 
         CandCacheEntry none_cache_entry;
         // Candidate cache entry for NONE case.
@@ -105,7 +103,7 @@ class EditHelper
         // Delimiter of the preview window.
 
         const float preview_ratio;
-        // Width of the preview window.
+        // Width ratio of the preview window.
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Private functions
@@ -157,17 +155,6 @@ class EditHelper
         //
         // [Args]
         //   cands (const Vector<Pair<String, String>>&): [IN] Completion candidates.
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
-        // Static private functions
-        ////////////////////////////////////////////////////////////////////////////////////////////
-
-        static void init_shared_futures(const Path& outdir, const RedAlienConfig& cfg);
-        // Initialize shared future instances for caching command names and compiled regular expression patterns.
-        //
-        // [Args]
-        //   outdir (const Path&)          : [IN] Path to output directory.
-        //   cfg    (const RedAlienConfig&): [IN] Config data for initializing the shared futures.
 };
 
 #endif

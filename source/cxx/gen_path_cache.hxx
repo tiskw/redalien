@@ -5,8 +5,8 @@
 /// environment variable.                                                                        ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef CMDS_CACHE_HXX
-#define CMDS_CACHE_HXX
+#ifndef GEN_PATH_CACHE_HXX
+#define GEN_PATH_CACHE_HXX
 
 // Include the headers of custom modules.
 #include "config.hxx"
@@ -17,8 +17,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int32_t generate_path_commands_cache(void);
-// Generate the command cache by searching all executable files in the directories specified
-// in the "PATH" environment variable, and save it to "path_cmnd_info" file.
+// Print all commands in PATH environment variable.
 //
 // [Returns]
 //   (int32_t): EXIT_SUCCESS if no error occurred, otherwise EXIT_FAILURE.

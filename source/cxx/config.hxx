@@ -105,7 +105,7 @@ struct RedAlienConfig
     // Delimiter of the preview window.
     String preview_delim = " │ ";
 
-    // Width of the preview window.
+    // Width ratio of the preview window.
     float preview_ratio = 0.45;
 
     ////////////////////////////////////////////////////////////////////////////

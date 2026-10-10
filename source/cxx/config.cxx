@@ -27,7 +27,7 @@
 namespace
 {
     void show_error_msg_undefined_entry(const toml::key& section, const toml::key& value)
-    // Show error message and quit this software.
+    // Show error message and continue this software.
     //
     // [Args]
     //   section (const toml::key&): [IN] Section name.
@@ -45,7 +45,7 @@ namespace
     }   // }}}
 
     void show_error_msg_invalid_entry(const toml::node_view<const toml::node> entry, const char* prefix)
-    // Show error message and quit this software.
+    // Show error message and continue this software.
     //
     // [Args]
     //   entry (const toml::node&): [IN] TOML entry.
@@ -66,7 +66,7 @@ namespace
     //
     // [Args]
     //   completion_type (const StringView): [IN] Completion type string.
-    //   
+    //
     {   // {{{
 
         // Prepare warning message.

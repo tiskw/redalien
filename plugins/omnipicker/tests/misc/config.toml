@@ -23,5 +23,5 @@ ps_command = "ps aux"
 
 # The index of PID field in the output of "ps_command" above.
 idx_pid_field = 1
- 
-# vim: expandtab shiftwidth=4 shiftwidth=4
+
+# vim: expandtab tabstop=4 shiftwidth=4

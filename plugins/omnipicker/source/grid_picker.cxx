@@ -68,7 +68,7 @@ String run_grid_picker(StringView lhs, const OmniPickerConfig& cfg, StringView u
     // Load the history tokens from the specified history file path.
     Vector<String> items = load_history_tokens(expand_tilde(cfg.path_history));
 
-    // Initialize the filer state with the initial path.
+    // Initialize the state with the initial path.
     GridModel model(items);
 
     // Initialize the filer window with the specified width ratios and user input.
@@ -85,7 +85,7 @@ String run_grid_picker(StringView lhs, const OmniPickerConfig& cfg, StringView u
         // If the user input is Ctrl-D, exit the loop regardless of the window state.
         if (key == "^D") return String(lhs);
 
-        // If the user input is exit key, return an empty vector (indicate cancellation).
+        // If the user input is exit key, return lhs string.
         if ((key == "q") or (key == "Q")) return String(lhs);
 
         // If the user input is enter key, return the selected path(s).

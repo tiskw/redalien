@@ -34,9 +34,9 @@ String run_command(const Vector<StringView>& cmd_tokens, RunCommandOption option
 // If "err_out" is nullptr, the error output will be discarded.
 //
 // [Args]
-//   cmd_tokens   (const Vector<String*>&): [IN] Command and its arguments to run.
-//   option       (RunCommandOption)      : [IN] Options for running the command.
-//   err_out      (String*)               : [OUT] Pointer to a string to store the error output.
+//   cmd_tokens   (const Vector<String>&): [IN] Command and its arguments to run.
+//   option       (RunCommandOption)     : [IN] Options for running the command.
+//   err_out      (String*)              : [OUT] Pointer to a string to store the error output.
 //
 // [Returns]
 //   (String): Return value of the external command.

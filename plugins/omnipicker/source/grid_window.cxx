@@ -78,6 +78,7 @@ String GridWindow::getkey(void)
 
             // Remove the last character from the grep filter string.
             case hash("^H"):
+            case hash("^?"):
             case hash("KEY_BACKSPACE"):
                 this->grep_str = remove_last_utf8_char(this->grep_str);
                 return "";
@@ -139,7 +140,7 @@ void GridWindow::draw_header(const Vector<LineItem>& items, int32_t selected, in
     // Draw the instruction string below the header.
     this->screen.addstr_a(1, 0, clipstr("Move: arrow keys or hjkl    Select: SPACE    Cancel: q", w));
 
-};  // }}}
+}   // }}}
 
 void GridWindow::draw_grid(const Vector<LineItem>& items, int32_t selected, int32_t h, int32_t w)
 {   // {{{

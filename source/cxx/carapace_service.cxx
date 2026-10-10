@@ -38,7 +38,7 @@ namespace
             return (pos_equal == StringView::npos) ? last_token.substr(0, 2) : last_token.substr(0, pos_equal + 1);
         }
 
-        // Short option: "-x" returns "-", "-xxx" returns "-", "-x=y" returns "-x=".
+        // Short option: always returns "-" (e.g. "-x", "-xxx", and "-x=y" return "-").
         if (last_token.starts_with("-"))
         {
             const SizeType pos_equal = last_token.find('=');
@@ -61,12 +61,12 @@ namespace
 
     }   // }}}
 
-    bool sort_func(const Tuple<StringView, StringView, StringView>& t1, const Tuple<StringView, StringView, StringView>& t2) noexcept
+    bool sort_func(const Tuple<StringView, StringView, const char*>& t1, const Tuple<StringView, StringView, const char*>& t2) noexcept
     // Sort the completion candidates based on their values and whether they are directories or files.
     //
     // [Args]
-    //   t1 (const Tuple<StringView, StringView, StringView>&): [IN] First tuple to compare.
-    //   t2 (const Tuple<StringView, StringView, StringView>&): [IN] Second tuple to compare.
+    //   t1 (const Tuple<StringView, StringView, const char*>&): [IN] First tuple to compare.
+    //   t2 (const Tuple<StringView, StringView, const char*>&): [IN] Second tuple to compare.
     //
     // [Returns]
     //   (bool): True if the first tuple should come before the second tuple, false otherwise.

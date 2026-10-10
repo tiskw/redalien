@@ -93,7 +93,7 @@ window:
 Configuration
 ----------------------------------------------------------------------------------------------------
 
-`omnipicker` reads only the `[PLUGIN_omnipicker]` section of a TOML configuration file and ignores
+`omnipicker` reads only the `[PLUGIN_OMNIPICKER]` section of a TOML configuration file and ignores
 all other sections. Therefore, you can place the `omnipicker` settings directly in the main RedAlien
 configuration file.
 

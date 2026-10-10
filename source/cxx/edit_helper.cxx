@@ -36,6 +36,30 @@ namespace
     std::once_flag flag_init_shared_futures;
     // A flag for one-time initialization of shared future instances.
 
+    String colorize_name(StringView name, const String& query_key, const char* color_code)
+    // Colorize the file name based on the file type and the user input query key.
+    //
+    // [Args]
+    //   name       (const String&): [IN] File name to be colorized.
+    //   query_key  (const String&): [IN] User input query key for colorization.
+    //   color_code (const char*)  : [IN] Color code for the file type.
+    //
+    // [Returns]
+    //   (String): Colorized file name for display.
+    //
+    {   // {{{
+
+        // Returns without query colorization if the query key is empty or the query key is invalid.
+        if (query_key.empty() or name.size() < query_key.size())
+            return std::format("{}{}\x1B[0m", color_code, name);
+
+        // Colorize the matched query key.
+        const StringView sv1 = name.substr(0, query_key.size());
+        const StringView sv2 = name.substr(query_key.size());
+        return std::format("\x1B[35m{}\x1B[0m{}{}\x1B[0m", sv1, color_code, sv2);
+
+    }   // }}}
+
     Vector<String> columnize(const Vector<StringView>& texts, Size area_size, uint16_t padding)
     // Columnize the given string vector.
     //
@@ -354,29 +378,26 @@ namespace
 
     }   // }}}
 
-    String colorize_name(StringView name, const String& query_key, const char* color_code)
-    // Colorize the file name based on the file type and the user input query key.
+    void init_shared_futures(const Path& outdir, const RedAlienConfig& cfg)
+    // Initialize shared future instances for caching command names and compiled regular expression patterns.
     //
     // [Args]
-    //   name       (const String&): [IN] File name to be colorized.
-    //   query_key  (const String&): [IN] User input query key for colorization.
-    //   color_code (const char*)  : [IN] Color code for the file type.
-    //
-    // [Returns]
-    //   (String): Colorized file name for display.
+    //   outdir (const Path&)          : [IN] Path to output directory.
+    //   cfg    (const RedAlienConfig&): [IN] Config data for initializing the shared futures.
     //
     {   // {{{
 
-        // Returns withour query colorization if the query key is empty or the query key is invalid.
-        if (query_key.empty() or name.size() < query_key.size())
-            return std::format("{}{}\x1B[0m", color_code, name);
+        // Get the paths of the command info and bash info files.
+        const Path path_cmnd_info = outdir / "cmnd_info.txt";
+        const Path path_bash_info = outdir / "bash_info.txt";
 
-        // Colorize the matched query key.
-        const StringView sv1 = name.substr(0, query_key.size());
-        const StringView sv2 = name.substr(query_key.size());
-        return std::format("\x1B[35m{}\x1B[0m{}{}\x1B[0m", sv1, color_code, sv2);
+        // Create the cache of available command names.
+        shared_future_cache_commands = launch_async(get_available_commands, path_cmnd_info, path_bash_info).share();
 
-    };  // }}}
+        // Create the cache of compiled regular expression patterns for completion matching.
+        shared_future_vec_patterns_regex = launch_async(compile_regex_patterns, cfg.completions).share();
+
+    }   // }}}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -390,7 +411,7 @@ EditHelper::EditHelper(uint16_t rows, uint16_t cols, const Path& outdir, const R
 {   // {{{
 
     // Initialize shared future instances for caching command names and compiled regular expression patterns.
-    std::call_once(flag_init_shared_futures, &EditHelper::init_shared_futures, outdir, cfg);
+    std::call_once(flag_init_shared_futures, &init_shared_futures, outdir, cfg);
 
 }   // }}}
 
@@ -421,9 +442,13 @@ const Vector<String>& EditHelper::candidate(StringView lhs)
     for (const StringView token : tokenize(lhs, TOKENIZE_PLAIN))
         tokens.emplace_back(token);
 
-    // Add empty token if the editing line ends with white-space.
-    if (lhs.size() > 0 and lhs.back() == ' ')
+    // Add empty token if the editing line ends with white-space (except inside an open quote).
+    if ((lhs.size() > 0) and (lhs.back() == ' ') and (tokens.empty() or not is_open_quote(tokens.back())))
         tokens.push_back(StringView(""));
+
+    // Strip the quotes of the last token, because candidates are computed from the raw string.
+    if (not tokens.empty())
+        tokens.back() = unquote(tokens.back());
 
     // Get completion type and its optional string.
     const auto& [comp_type, option] = get_target(tokens, this->completions, shared_future_vec_patterns_regex.get());
@@ -532,11 +557,12 @@ String EditHelper::complete(StringView lhs) const
     // Get the first candidate (this item will be used many times in the following).
     const Pair<String, String>& cand_first = (*this->cands)[0];
 
-    // Concatenate tokens except the last token.
-    // If the last token is a whitespace token, then do not drop the last token.
+    // The raw token (possibly quoted) is replaced, while the unquoted one is used for matching.
+    const StringView raw_token = tokens.back();
+    const StringView last_token = unquote(raw_token);
     StringView lhs_without_last_token = (
-        tokens.back().starts_with(" ") or tokens.back().starts_with("\t") or not cand_first.first.starts_with(tokens.back())
-    ) ? StringView(lhs) : StringView(lhs.data(), lhs.size() - tokens.back().size());
+        raw_token.starts_with(" ") or raw_token.starts_with("\t") or not cand_first.first.starts_with(last_token)
+    ) ? StringView(lhs) : StringView(lhs.data(), lhs.size() - raw_token.size());
 
     // Compute completion string.
     if ((num_cands == 1) and cand_first.first.ends_with('/'))
@@ -544,20 +570,19 @@ String EditHelper::complete(StringView lhs) const
         // Extra slash will be added when directory path is completed.
         // However, slash is already added to the completion token,
         // therefore just adding the completion token is enough.
-        return String(lhs_without_last_token) + cand_first.first;
+        return String(lhs_without_last_token) + shell_quote(cand_first.first, false);
     }
     else if (num_cands == 1)
     {
         // Add extra white-space at the end if number of completion candidate is one.
-        return String(lhs_without_last_token) + cand_first.first + ' ';
+        return String(lhs_without_last_token) + shell_quote(cand_first.first, true) + ' ';
     }
     else
     {
-        // Create an array of completion strings.
+        // Create an array of completion strings and find the common substring among them.
         constexpr auto get_first = [](const Pair<String, String>& pair) noexcept -> String { return pair.first; };
         Vector<String> keys = transform<Pair<String, String>, String>(*this->cands, get_first);
-
-        return String(lhs_without_last_token) + String(get_common_substr(keys));
+        return String(lhs_without_last_token) + shell_quote(get_common_substr(keys), false);
     }
 
 }   // }}}
@@ -608,7 +633,7 @@ void EditHelper::cands_carapace(const Vector<StringView>& tokens)
 
     // Split user input token to a tuple of:
     //   * directory path to be searched,
-    //   * query string for filtering seach result.
+    //   * query string for filtering search result.
     const auto [query_dir, query_key] = split_to_target_and_query(tokens);
 
     // Colorize the completion candidates based on the style information from carapace,
@@ -626,7 +651,7 @@ void EditHelper::cands_filepath(const Vector<StringView>& tokens)
 
     // Split user input token to a tuple of:
     //   * directory path to be searched,
-    //   * query string for filtering seach result.
+    //   * query string for filtering search result.
     const auto [query_dir, query_key] = split_to_target_and_query(tokens);
 
     // List the matched entries. The prefix filtering, the hidden file filtering,
@@ -807,20 +832,5 @@ void EditHelper::lines_from_cands(const Vector<Pair<String, String>>& cands)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // EditHelper: Private static member functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void EditHelper::init_shared_futures(const Path& outdir, const RedAlienConfig& cfg)
-{   // {{{
-
-    // Get the paths of the command info and bash info files.
-    const Path path_cmnd_info = outdir / "cmnd_info.txt";
-    const Path path_bash_info = outdir / "bash_info.txt";
-
-    // Create the cache of available command names.
-    shared_future_cache_commands = launch_async(get_available_commands, path_cmnd_info, path_bash_info).share();
-
-    // Create the cache of compiled regular expression patterns for completion matching.
-    shared_future_vec_patterns_regex = launch_async(compile_regex_patterns, cfg.completions).share();
-
-};  // }}}
 
 // vim: expandtab tabstop=4 shiftwidth=4 fdm=marker

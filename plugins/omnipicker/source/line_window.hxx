@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-/// C++ header file: window.hxx                                                                  ///
+/// C++ header file: line_window.hxx                                                             ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef LINE_WINDOW_HXX
@@ -39,7 +39,7 @@ class LineWindow
         // Prohibit copying and assignment of LineWindow instances.
 
         ////////////////////////////////////////////////////////////////////////////////////////////
-        // 
+        // Public member functions
         ////////////////////////////////////////////////////////////////////////////////////////////
 
         void draw(const Vector<LineItem>& contents_filt, int32_t focus_filt);
@@ -58,7 +58,7 @@ class LineWindow
         // Returns the key string if not consumed internally, or "" if consumed.
         //
         // [Returns]
-        //   (String): The key string if not consumed internally (e.g. for quitting or confirming selection), or an empty string if the key was consumed for internal state changes (e.g. navigation, toggling preview, opening grep window).
+        //   (String): The key string if not consumed internally.
 
     private:
 
@@ -70,7 +70,7 @@ class LineWindow
         // The CursesScreen object for handling ncurses drawing and input.
 
         bool has_grep_win;
-        // Flags indicating whether the grep window and preview window are currently displayed.
+        // Flag indicating whether the grep window is currently displayed.
 
         String grep_str;
         // Current grep filter string.

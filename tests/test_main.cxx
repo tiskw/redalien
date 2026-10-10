@@ -497,15 +497,6 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // candidate("ls --") → OPTION (>> -.*) → cands_option
-    ////////////////////////////////////////////////////////
-    {
-        EditHelper eh(8, 80, Path("/tmp"), cfg);
-        const Vector<String> lines = eh.candidate("ls --");
-        expect(lines.size() == (size_t) cfg.area_height);
-    }
-
-    ////////////////////////////////////////////////////////
     // candidate("cat Makefile ") → PREVIEW (>> FILE "") → cands_filepath + cands_preview
     ////////////////////////////////////////////////////////
     {
@@ -516,16 +507,7 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // candidate("git ") → SUBCMD+BASHCOMP → cands_subcmd
-    ////////////////////////////////////////////////////////
-    {
-        EditHelper eh(8, 80, Path("/tmp"), cfg);
-        const Vector<String> lines = eh.candidate("git ");
-        expect(lines.size() == (size_t) cfg.area_height);
-    }
-
-    ////////////////////////////////////////////////////////
-    // candidate("apt ") → SUBCMD → cands_subcmd
+    // candidate("apt ") → CARAPACE (>> .*) → cands_carapace
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
@@ -569,15 +551,14 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // Cache hit: cache_cands_mat (different lhs, same pattern match)
-    // "git pu" and "git " both match [["git", ".*"], subcmd] with same token hash
+    // Different lhs that match the same completion pattern ([">>", ".*"] → CARAPACE).
+    // Each lhs has its own entry in cache_cands_lhs.
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
-        // "git st" – matching SUBCMD pattern for git, first token "git"
+        // "git st" – CARAPACE completion for the second token.
         [[maybe_unused]] const Vector<String> lines1 = eh.candidate("git st");
-        // "git " – same pattern but different lhs; if hash_mat is the same, cache_cands_mat hits
-        // (This exercises the mat-cache path when different lhs leads to same matched tokens.)
+        // "git " – same pattern but different lhs (a separate cache entry is created).
         [[maybe_unused]] const Vector<String> lines2 = eh.candidate("git ");
         expect(lines1.size() == (size_t) cfg.area_height);
         expect(lines2.size() == (size_t) cfg.area_height);
@@ -621,7 +602,7 @@ static void test_EditHelper(void)
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
-        // "git " → multiple subcmd candidates starting differently
+        // "git " → multiple CARAPACE candidates starting differently
         eh.candidate("git ");
         const String result = eh.complete("git ");
         // Result should not crash and be a string starting with "git "
@@ -652,18 +633,18 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // BASHCOMP: candidate("tar xvf") falls through to bashcomp
+    // CARAPACE: candidate("tar xvf") falls through to the generic carapace entry
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
         // "tar xvf" has no specific entry and the last token "xvf" is non-empty,
-        // non-dash, not an existing file -> matches [[">>", ".*"], "bashcomp", ""].
+        // not an existing file -> matches [[">>", ".*"], "carapace", ""].
         const Vector<String> lines = eh.candidate("tar xvf");
         expect(lines.size() == (size_t) cfg.area_height);
     }
 
     ////////////////////////////////////////////////////////
-    // BASHCOMP: cache_cands_lhs hit on identical input
+    // CARAPACE: cache_cands_lhs hit on identical input
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
@@ -673,9 +654,9 @@ static void test_EditHelper(void)
     }
 
     ////////////////////////////////////////////////////////
-    // BASHCOMP: no cache_cands_mat collision across different commands
+    // CARAPACE: no cache collision across different commands
     // "pip xvf" and "tar xvf" share the same last token but must not share
-    // the mat-cache, so neither call should crash or return wrong data.
+    // the cache entry, so neither call should crash or return wrong data.
     ////////////////////////////////////////////////////////
     {
         EditHelper eh(8, 80, Path("/tmp"), cfg);
@@ -729,6 +710,24 @@ static void test_EditHelper(void)
         EditHelper helper(8, 80, Path("/tmp"), cfg);
         const Vector<String> lines = helper.candidate("ls .");
         expect(lines.size() == (size_t) cfg.area_height);
+    }
+
+    ////////////////////////////////////////////////////////
+    // Completion of a file path containing spaces
+    ////////////////////////////////////////////////////////
+    {
+        // Prepare a file whose name contains a space.
+        stdfs::create_directories("/tmp/redalien_q/my dir");
+        std::ofstream("/tmp/redalien_q/my file.txt");
+
+        EditHelper eh(8, 80, Path("/tmp"), cfg);
+        eh.candidate("ls /tmp/redalien_q/my f");
+        expect(eh.complete("ls /tmp/redalien_q/my f") == "ls '/tmp/redalien_q/my file.txt' ");
+
+        eh.candidate("ls '/tmp/redalien_q/my d");
+        expect(eh.complete("ls '/tmp/redalien_q/my d") == "ls '/tmp/redalien_q/my dir/");
+
+        stdfs::remove_all("/tmp/redalien_q");
     }
 
 }   // }}}
@@ -1147,7 +1146,6 @@ static void test_PathX(void)
     // Test 5: listdir.
     expect(PathX("").listdir("").entries.size() > 0);
     expect(PathX("/not_exists").listdir("").entries.size() == 0);
-    // expect(PathX(".").listdir("").entries.size() == 1);
 
     // The contents of the home directory are environment dependent, so only
     // the fact that the call succeeds without throwing is verified here.
@@ -1271,8 +1269,9 @@ static void test_RedAlienConfig(void)
     // Path to temporary config file used for testing.
     const char* path_cfg = "/tmp/redalien_test_config_ext.toml";
 
-    // Write a config file that covers every completion type, every malformed-entry
-    // branch, and the range checks applied after parsing.
+    // Write a config file that covers every supported completion type, unknown (or removed)
+    // completion types that fall back to "path", every malformed-entry branch, and the range
+    // checks applied after parsing.
     {
         std::ofstream ofs(path_cfg);
         ofs << R"TOML(
@@ -1598,7 +1597,7 @@ static void test_TermUserIF_pty(void)
         }
 
         ////////////////////////////////////////////////////////
-        // getch() with wakeup_fd set but only stdin fires (lines 131-132)
+        // getch() with wakeup_fd set but only stdin fires
         // Passing a valid wakeup_fd exercises the FD_SET(wakeup_fd) branch.
         ////////////////////////////////////////////////////////
         {
@@ -1613,7 +1612,7 @@ static void test_TermUserIF_pty(void)
         }
 
         ////////////////////////////////////////////////////////
-        // getch() with wakeup_fd fires but no stdin data (lines 145-150)
+        // getch() with wakeup_fd fires but no stdin data
         // When only the wakeup pipe fires, getch() drains it and returns empty.
         ////////////////////////////////////////////////////////
         {
@@ -3235,7 +3234,7 @@ static void test_readcmd(void)
 
     // History completions.
     expect(run_test_readcmd("previ\x05\n", "previous input2 ", ""));
-    expect(run_test_readcmd("previous input1\x05\n", "previous input1 ", ""));
+    expect(run_test_readcmd("previous input1\x05\n", "previous input1", ""));
 
     // Test the stop key.
     expect(run_test_readcmd("\x06\n", "^F", ""));

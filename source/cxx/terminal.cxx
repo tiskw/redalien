@@ -152,7 +152,6 @@ CharX TermUserIF::getch(int wakeup_fd)
     if ((this->read_bytes == 0) or (this->read_bytes < utf8_byte_size(static_cast<uint8_t>(this->tmpbuf[0]))))
     {
         // When the buffer is empty, use select() to wait for stdin OR a completion wakeup.
-        // This avoids the fixed 100ms VTIME polling lag when the worker finishes quickly.
         if (this->read_bytes == 0)
         {
             struct timeval tv = {1, 0};  // 1-second safety-net timeout.
@@ -254,7 +253,7 @@ bool TermUserIF::update_lines(const Vector<String>& lines)
         // If the current line is different from the previous line, update it.
         if (lines[n] != this->lines_prev[n])
         {
-            // Move the cursor to the beginning of the line.
+            // Update the buffer with the current line and clear the rest of the line.
             this->buffer += lines[n] + "\x1B[0K";
 
             // Update the previous line with the current line.
@@ -362,7 +361,7 @@ void TermUserIF::ini_terminal_attr(void)
 
     // NOTE: termios.c_cc[VMIN] and termios.c_cc[VTIME].
     //       <https://manpages.debian.org/bookworm/manpages-dev/termios.3.en.html>
-    // 
+    //
     // MIN == 0, TIME == 0 (polling read):
     //     If data is available, read(2) returns immediately, with the lesser of the number of bytes
     //     available, or the number of bytes requested. If no data is available, read(2) returns 0.
@@ -382,11 +381,20 @@ void TermUserIF::ini_terminal_attr(void)
     //     TIME specifies the limit for a timer in tenths of a second. Once an initial byte of
     //     input becomes available, the timer is restarted after each further byte is received.
     //     read(2) returns when any of the following conditions is met:
+    //       - MIN bytes have been received.
+    //       - The interbyte timer expires.
+    //       - The number of bytes requested by read(2) has been received (this condition is
+    //         not specified by POSIX, and some implementations do not return in this case).
+    //     Because the timer is started only after the initial byte becomes available, read(2)
+    //     blocks until at least one byte is available, and then returns at least one byte.
+    //
+    // This class uses "MIN == 0, TIME == 0" (polling read), because all waiting is handled
+    // by select() in getch(), which also watches the wakeup pipe of the async completion.
 
     // Set the cbreak termios to STDIN.
     tcsetattr(this->fd, TCSAFLUSH, &term_cpy);
 
-    // Hide cursor and enable bracketed paste mode.
+    // Hide cursor.
     this->print("\033[?25l", 6);
 
 }   // }}}
@@ -397,7 +405,7 @@ void TermUserIF::fin_terminal_attr(void)
     // Restore the termios saved in the constructor.
     tcsetattr(this->fd, TCSANOW, &this->term);
 
-    // Show cursor and disable bracketed paste mode.
+    // Show cursor.
     this->print("\033[?25h", 6);
 
 }   // }}}

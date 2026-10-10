@@ -24,9 +24,11 @@ class CarapaceService
         // Constructors and destructors
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-         CarapaceService(const RedAlienConfig& cfg);
+        explicit CarapaceService(const RedAlienConfig& cfg);
+        // Constructor for the CarapaceService class.
+
         ~CarapaceService(void);
-        // Constructor and destructor for the CarapaceService class.
+        // Destructor for the CarapaceService class.
 
         // NOTE: This class should be non-copyable and non-movable.
         CarapaceService(const CarapaceService&)              = delete;
@@ -45,7 +47,7 @@ class CarapaceService
         //   tokens (const Vector<StringView>&): [IN] The parsed tokens of the user input.
         //
         // [Returns]
-        //   (Generator<Pair<String, String>>): A vector of matching completion strings and their descriptions.
+        //   (Generator<Tuple<StringView, StringView, const char*>>): A generator that yields tuples of (candidate, description, color_code).
 
     private:
 
@@ -71,7 +73,7 @@ class CarapaceService
         //
         // [Args]
         //   style (StringView): [IN] The style string returned from the "carapace".
-        //        
+        //
         // [Returns]
         //   (const char*): The color code corresponding to the given style string.
 };

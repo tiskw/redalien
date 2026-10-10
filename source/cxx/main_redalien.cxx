@@ -38,7 +38,7 @@ namespace
 {
     String get_git_branch_info(void)
     // Get git branch and status information and return as a colored string.
-    // 
+    //
     // [Returns]
     //   (String): Colored string of git information.
     //
@@ -178,15 +178,15 @@ namespace
     }   // }}}
 
     Tuple<String, String> run_plugin(const ReadCmdOut& rc_out, const StringMap& plugin_trigger_keys, const Path& path_plugin_out)
-    // Run the given keybind.
+    // Run the plugin command bound to the stop key, and read its output file.
     //
     // [Args]
     //   rc_out              (const ReadCmdOut&): [IN] Output of "readcmd" function.
-    //   plugin_trigger_keys (const StringMap&) : [IN] Map of keybinds in the config file.
-    //   output_plugin       (const String&)    : [IN] Path to the plugin output file.
+    //   plugin_trigger_keys (const StringMap&) : [IN] Map of plugin trigger keys in the config file.
+    //   path_plugin_out     (const Path&)      : [IN] Path to the plugin output file.
     //
     // [Returns]
-    //   (Tuple<String, String>): Left and right hand side of the editing buffer after keybind.
+    //   (Tuple<String, String>): Left and right hand side of the editing buffer after running the plugin.
     //
     {   // {{{
 
@@ -276,17 +276,17 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     }
 
     // Print version information and exit if -v/--version is specified.
-    if (args.count("version")) 
+    if (args.count("version"))
     {
         std::cout << VERSION << '\n';
         return EXIT_SUCCESS;
     }
 
-    // Run other task and exit if -r/--run is specified.
+    // Run other task and exit if -g/--gen-cache is specified.
     if (args.count("gen-cache"))
         return generate_path_commands_cache();
 
-    // The argument --outdir is a mandatory option for this program, threrfore if --outdir is not
+    // The argument --outdir is a mandatory option for this program, therefore if --outdir is not
     // specified or invalid, print an error message and exit. Note that we include a brief sleep
     // at the end. This is because this program is designed to be called repeatedly, and the pause
     // prevents the CPU from becoming overburdened by rapid, repetitive execution.
@@ -295,7 +295,7 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     {
         print_error("Error", "The mandatory option --outdir is not provided or invalid.");
 
-        // Sleep for 200 milliseconds before checking again.
+        // Sleep for 200 milliseconds.
         struct timespec ts;
         ts.tv_sec  = 0;
         ts.tv_nsec = 200 * 1000 * 1000;
@@ -348,26 +348,22 @@ int32_t main_redalien(int32_t argc, char* argv[], const char* input_ptr)
     std::cout << cfg.datetime_pre << get_time(std::time(nullptr), "%Y/%m/%d %H:%M:%S") << cfg.datetime_post;
     std::cout << ' ' << colorize(user_input);
 
-    // Write the user input to the output file if specified.
-    if (args.count("outdir"))
+    // Get the path to the output file.
+    const Path path_output = outdir / "redalien.out";
+
+    // Open the output file.
+    std::ofstream ofs(path_output);
+    if (not ofs.is_open())
     {
-        // Get the path to the output file.
-        const Path path_output = outdir / "redalien.out";
-
-        // Open the output file.
-        std::ofstream ofs(path_output);
-        if (not ofs.is_open())
-        {
-            std::cerr << "Failed to open file: " << path_output << std::endl;
-            return EXIT_FAILURE;
-        }
-
-        // Write the user input to the output file.
-        ofs << user_input << '\n';
-
-        // Close the file.
-        ofs.close();
+        std::cerr << "Failed to open file: " << path_output << std::endl;
+        return EXIT_FAILURE;
     }
+
+    // Write the user input to the output file.
+    ofs << user_input << '\n';
+
+    // Close the file.
+    ofs.close();
 
     return EXIT_SUCCESS;
 

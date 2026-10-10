@@ -49,7 +49,7 @@ int main(void)
 
     std::setlocale(LC_ALL, "");
 
-    //
+    // Test for "clipstr" function.
     assert(clipstr("abcdef", 0) == "");
     assert(clipstr("abcdef", -4) == "");
     assert(clipstr("abcdef", 3) == "abc");
@@ -58,26 +58,19 @@ int main(void)
     assert(clipstr("aあb", 3) == "aあ");
     assert(clipstr("あいう", 4) == "あい");
 
-    //
+    // Test for "is_ansi" function.
     assert(is_ansi("\x1b[0m"));
     assert(is_ansi("\x1b[31m"));
     assert(not is_ansi(""));
     assert(not is_ansi("[31m"));
     assert(not is_ansi("\x1b[31K"));
 
-    //
+    // Test for "remove_last_utf8_char" function.
     assert(String(remove_last_utf8_char("abc")) == "ab");
     assert(String(remove_last_utf8_char("aあ")) == "a");
     assert(String(remove_last_utf8_char("")) == "");
 
-    // assert(parse_ansi("\x1b[0m") == 0);
-    // assert(parse_ansi("\x1b[m") == 0);
-    // assert(parse_ansi("\x1b[31m") == 31);
-    // assert(parse_ansi("\x1b[1;32m") == 32);
-    // assert(parse_ansi("\x1b[38;5;1m") == 0);
-    // assert(parse_ansi("not ansi") == 0);
-
-    //
+    // Test for "split_ansi" function.
     const auto parts = collect_split_ansi(String("A") + "\x1b[31m" + "B" + "\x1b[0m" + "C");
     assert(parts.size() == static_cast<size_t>(5));
     assert(parts[0] == "A");
@@ -86,7 +79,7 @@ int main(void)
     assert(parts[3] == "\x1b[0m");
     assert(parts[4] == "C");
 
-    //
+    // Test for "strwidth" function.
     assert(strwidth("abc") == 3);
     assert(strwidth("aあb") == 4);
     assert(strwidth(String("\x1b[31m") + "赤" + "\x1b[0m") == 2);

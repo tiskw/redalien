@@ -136,6 +136,7 @@ String FileWindow::getkey(void)
 
             // Remove the last character from the grep filter string.
             case hash("^H"):
+            case hash("^?"):
             case hash("KEY_BACKSPACE"):
                 this->grep_str = remove_last_utf8_char(this->grep_str);
                 return "";

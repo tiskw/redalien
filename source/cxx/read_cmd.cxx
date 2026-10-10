@@ -89,7 +89,7 @@ ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& 
     if (use_async_compl) { opt_async_compl.emplace(cfg.area_height, term_size.cols, outdir, cfg); }
     else                 { opt_edit_helper.emplace(cfg.area_height, term_size.cols, outdir, cfg); }
 
-    // NOTE: TermUserIF is declared at the end intentionally, bacause the object destruction
+    // NOTE: TermUserIF is declared at the end intentionally, because the object destruction
     // order is the reverse of the declaration, so the terminal is restored to canonical mode
     // before any completion machinery is destroyed.
     TermUserIF termui = TermUserIF(cfg.area_height, term_size.cols);
@@ -127,10 +127,10 @@ ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& 
         // Do nothing if the character is empty.
         if (cx.size() == 0) continue;
 
-        // Update the "inputs" view if it's not nullptr.
+        // Update the "inputs" view if it is used for non-interactive input mode.
         inputs = (inputs.size() > 0) ? (StringView(inputs.begin() + cx.size(), inputs.end())) : inputs;
 
-        // Exit if one of the step key is typed.
+        // Exit if one of the stop key is typed.
         if (stop_keys.contains(cx.printable()))
             return ReadCmdOut(lhs, rhs, cx.printable(), inputs);
 
@@ -155,9 +155,8 @@ ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& 
             // History completion.
             else if (c == keycode_hist_comp)
             {
-                const StringView hist_comp = histmn.complete(lhs);
                 if (not hist_comp.empty())
-                    editor->set(String(lhs) + String(histmn.complete(lhs)) + " ", rhs);
+                    editor->set(String(lhs) + String(hist_comp) + " ", rhs);
             }
 
             // Execute completion.

@@ -22,11 +22,11 @@ Vector<String> preview(StringView path, uint16_t height, const StringMap& previe
 //
 // [Args]
 //   path     (StringView)      : [IN] Path to the target file.
-//   height   (int16_t)         : [IN] Height of preview window.
+//   height   (uint16_t)        : [IN] Height of preview window.
 //   previews (const StringMap&): [IN] Map of the preview commands.
 //
 // [Returns]
-//   (const Vector<String>&): Lines of preview contents.
+//   (Vector<String>): Lines of preview contents.
 
 #endif
 

@@ -95,7 +95,7 @@ function __redalien_select_existing_file__ ()
         fi
     done
 
-    # Otherwise, print an error message and exit this function.
+    # Otherwise, return "-" to indicate that no file exists.
     echo "-"
     return 0
 
@@ -107,7 +107,7 @@ __REDALIEN_CONFIG_FILES__=(
     "${__REDALIEN_INSTALL_DIR__}/default/config.toml"
 )
 
-# Select the bashrc and config files to load.
+# Select the config file to load.
 __REDALIEN_CONFIG_PATH__=$(__redalien_select_existing_file__ "${__REDALIEN_CONFIG_FILES__[@]}")
 
 #---------------------------------------------------------------------------------------------------
@@ -192,7 +192,7 @@ function __redalien_call__ ()
 
     # Inherit the editing mode from the current shell's settings.
     local editor="emacs"
-    [[ ! -z "$(set -o | grep '^vi ' | grep 'on')" ]] && editor="vi"
+    [[ -o vi ]] && editor="vi"
 
     # Call redalien with the provided input and output file.
     if ! ${__REDALIEN_BINARY__} -c "${__REDALIEN_CONFIG_PATH__}" -e "${editor}" -o "${__REDALIEN_OUTDIR__}" -i "${1}"; then
@@ -312,7 +312,7 @@ function __redalien_setup__ ()
     # Create a output directory for RedAlien to store its output files.
     __REDALIEN_OUTDIR__=$(__redalien_make_outdir__)
 
-    # Do nothing if redalien_readcmd is not found.
+    # Do nothing if redalien is not found.
     command -v "${__REDALIEN_BINARY__}" >/dev/null 2>&1 || return 0
 
     # Generate the command cache for redalien if not exists.

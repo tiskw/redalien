@@ -26,7 +26,7 @@ class CharX
         // Constructor with UTF-8 character and its size in bytes.
         //
         // [Args]
-        //   str  (const char*): [IN] UTF-8 character string (must be at least 4 bytes long).
+        //   str  (const char*): [IN] UTF-8 character string.
         //   size (uint8_t)    : [IN] Size of the UTF-8 character in bytes.
 
         ////////////////////////////////////////////////////////////////////////////////////////////

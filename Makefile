@@ -2,7 +2,7 @@
 # Makefile
 ################################################################################
 
-.PHONY: build-amd64 build-arm64 redalien plugins release test check count clean help
+.PHONY: build-amd64 build-arm64 release-amd64 release-arm64 redalien plugins carapace-bin release test debug install check count clean concat help
 
 #-------------------------------------------------------------------------------
 # Compile settings
@@ -11,7 +11,7 @@
 # Software name.
 REDALIEN_PATH := build/redalien
 
-# Version number (extracted from source/bash/redalien_body).
+# Version number (extracted from source/cxx/main_redalien.hxx).
 VERSION := $(shell grep 'VERSION = "' source/cxx/main_redalien.hxx | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
 
 # Object directory.
@@ -187,5 +187,8 @@ clean:
 
 concat:
 	python3 utils/concatenate_source_files.py > redalien_source_concatenated.txt
+
+find_extra_whitespaces:
+	grep -rnE '[[:blank:]]+$$' source tests plugins
 
 # vim: noexpandtab tabstop=4 shiftwidth=4

@@ -48,7 +48,7 @@ class AsyncComp
         //   (String): Completed left-hand-side string.
 
         Vector<String> get_completion_result(void);
-        // Same interface as before; picks up results from the worker thread.
+        // Returns the latest completion result from the worker thread.
         //
         // [Returns]
         //   (Vector<String>): Array of lines (strings) for showing completion candidates to users.
@@ -116,7 +116,7 @@ class AsyncComp
         // never held at the same time, hence no lock-ordering hazard exists.
 
         EditHelper helper;
-        // Helper for computing completion candidates (used only in the worker thread).
+        // Helper for computing completion candidates.
 };
 
 #endif

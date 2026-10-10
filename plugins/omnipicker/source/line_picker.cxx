@@ -42,7 +42,7 @@ namespace
     //
     {   // {{{
 
-        // Initialize the filer state with the initial path.
+        // Initialize the state with the initial path.
         LineModel model(items);
 
         // Initialize the filer window with the specified width ratios and user input.
@@ -59,7 +59,7 @@ namespace
             // If the user input is Ctrl-D, exit the loop regardless of the window state.
             if (key == "^D") return {};
 
-            // If the user input is exit key, return an empty vector (indicate cancellation).
+            // If the user input is exit key, return no selection (indicate cancellation).
             if ((key == "q") or (key == "Q")) return {};
 
             // If the user input is enter key, return the selected path(s).
@@ -118,7 +118,6 @@ String run_env_picker(StringView lhs, const OmniPickerConfig& cfg, StringView us
 String run_hst_picker(StringView lhs, const OmniPickerConfig& cfg, StringView user_input)
 {   // {{{
 
-    // Check if the history file exists, and throw an error if it does not.
     const Path path_hist = expand_tilde(cfg.path_history);
 
     // Read and reverse the history entries so the most recent appears first.

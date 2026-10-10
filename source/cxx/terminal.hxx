@@ -50,7 +50,7 @@ class TermUserIF
         //   wakeup_fd (int): [IN] Optional extra fd to watch (e.g. AsyncComp wakeup pipe). -1 to disable.
         //
         // [Returns]
-        //   (const char*): Captured character.
+        //   (CharX): Acquired character as a CharX object.
 
         bool update_lines(const Vector<String>& lines);
         // Update the terminal with the given lines.
