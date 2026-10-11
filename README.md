@@ -355,7 +355,9 @@ its proven design principles and solid foundation.
 Architecture
 ----------------------------------------------------------------------------------------------------
 
-TBD.
+<p align="center">
+  <img src="utils/redalien_architecture.svg" width="75%">
+</p>
 
 
 Gratitude
