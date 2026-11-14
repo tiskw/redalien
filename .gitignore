@@ -1,0 +1,30 @@
+# Ignore build outputs.
+/build/**
+/release/**
+/plugins/build/**
+/plugins/*/objects/**
+
+# Ignore plugins build outputs.
+/plugins/build/**
+/plugins/omnipicker/omnipicker
+
+# Ignore docker related files.
+/docker/*.hpp
+/docker/*.apk
+
+# Ignore cache files.
+__pycache__
+.mypy_cache
+downloads/*.tar.gz
+
+# Ignore test files.
+/tests/source
+/tests/run_test
+*.gcda
+*.gcno
+*.gcov
+lcov
+lcov.info
+
+# Ignore concatenated file.
+redalien_source_concatenated.txt

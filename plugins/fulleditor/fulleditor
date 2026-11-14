@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# Raise an error if the script faces an unset variable.
+set -o nounset
+
+# Get the name of the script without the path.
+prog="${0##*/}"
+
+####################################################################################################
+# Parse command line arguments
+####################################################################################################
+
+# Define a function to print the usage message.
+function usage()
+{
+    echo "Usage:"
+    echo "    ${prog} -f PATH"
+    echo "    ${prog} (-h|--help)"
+    echo ""
+    echo "Necessary arguments:"
+    echo "    -f, --file PATH   Path to input/output file."
+    echo ""
+    echo "Other options:"
+    echo "    -h, --help        Show this help message and exit."
+}
+
+# Parse the command line arguments by the GNU getopt (util-linux).
+# NOTE: "ARGS=$(getopt ...)" loses getopt's exit status in "local", so assign it on its own.
+if ! ARGS=$(getopt -o f:h -l file:,help -n "${prog}" -- "${@}"); then
+    usage >&2
+    exit 1
+fi
+
+# Replace the positional parameters with the normalized ones.
+eval set -- "${ARGS}"
+
+path_io=""
+
+while true; do
+    case "${1}" in
+        -f | --file) path_io="${2}"; shift 2 ;;
+        -h | --help) usage; exit 0 ;;
+        --)          shift; break ;;
+        *)           echo "${0##*/}: internal error" >&2; exit 1 ;;
+    esac
+done
+
+# The option -f/--file is mandatory.
+if [ -z "${path_io}" ]; then
+    echo "${prog}: error: -f/--file is required." >&2
+    usage >&2
+    exit 1
+fi
+
+# Unexpected positional arguments.
+if [ ${#} -gt 0 ]; then
+    echo "${prog}: error: unexpected argument: ${*}" >&2
+    exit 1
+fi
+
+####################################################################################################
+# Call an editor and edit the file
+####################################################################################################
+
+# Get the editor from the environment variable $EDITOR, or use "vi" as a default.
+editor="${EDITOR:-vi}"
+
+# Call the editor to edit the file.
+"${editor}" "${path_io}"
+
+# vim: expandtab tabstop=4 shiftwidth=4 fdm=marker

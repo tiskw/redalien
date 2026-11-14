@@ -1,0 +1,156 @@
+# Config file for redalien
+
+####################################################################################################
+# General settings
+####################################################################################################
+[GENERAL]
+
+# Height of drawing area.
+area_height = 8
+
+# Size of padding in the column display.
+column_padding = 3
+
+# Path to history file.
+path_history = "~/.bash_history"
+
+# The maximum number of histories to read.
+max_hist_size = 5000
+
+# Prefix and postfix of the time stamp.
+# For example, you can set ANSI color code to colorize the time stamp.
+datetime_pre  = "\u001B[38;2;112;120;128m["
+datetime_post = "]\u001B[0m"
+
+# Prefix and postfix of the history hint.
+# For example, you can set ANSI color code to colorize history hint.
+histhint_pre  = "\u001B[38;2;112;120;128m"
+histhint_post = "\u001B[0m"
+
+####################################################################################################
+# Prompt settings
+####################################################################################################
+[PROMPT]
+
+# Prompts for editing area. The layout of prompt is the following.
+#
+# <- Bash's PS1 (if multiline) --------> <- ps_ex (is specified) ->
+# <- ps1i or ps1n -> <- user input ------------------------------->
+# <- ps2 -> <- user input ---------------------------------------->
+
+# Prompt for the first line of the editing area.
+ps1i = "\u001B[37m=>>\u001B[m "   # Insert mode of Vi-style editor, or Emacs-style editor.
+ps1n = "\u001B[37m<<=\u001B[m "   # Normal mode of Vi-style editor.
+
+# Prompt from the second line onwords.
+ps2 = "\u001B[37m...\u001B[m "
+
+# Additional string to be displayed at the end of the above the editing area.
+ps_ex = "{git}"
+
+####################################################################################################
+# Keybind settings
+####################################################################################################
+[KEYBIND]
+
+# Key bindings for completion.
+candidate_completion_key = "^I"
+
+# Key bindings for history completion.
+history_completion_key = "^E"
+
+# Key bindings for plugins. The format of each element is [key, command],
+# where key is a string of a single key, and command is a string of a command to be executed.
+#
+# The following placeholders are available in the command string:
+#   - {path_plugin}: path to the plugin directory.
+#   - {path_io}    : path to the input/output file of the plugin.
+#
+plugin_trigger_keys = [
+
+    # Key bindings for omnipicker plugin.
+    ["^F", "{path_plugin}/omnipicker -m file -f {path_io}"],
+    ["^R", "{path_plugin}/omnipicker -m hist -f {path_io}"],
+    ["^P", "{path_plugin}/omnipicker -m pid  -f {path_io}"],
+
+    # Key bindings for fulleditor plugin.
+    ["^G", "{path_plugin}/fulleditor -f {path_io}"],
+
+    # Other shortcut keys.
+    ["^L", "clear"],
+]
+
+####################################################################################################
+# Completion settings
+####################################################################################################
+[COMPLETION]
+
+completions = [
+
+    # Make command completions.
+    [["make", ".*"], "grep", "Makefile\t(^[a-zA-Z0-9_-]+):"],
+
+    # Ssh command completions.
+    [["ssh", ".*"], "grep", "~/.ssh/config\tHost ([a-zA-Z0-9_-]+)"],
+
+    # General completions.
+    [["",],              "path",     ""],
+    [["[./~].*",],       "path",     ""],
+    [[".+",],            "command",  ""],
+    [[">>", "FILE", ""], "preview",  ""],
+    [[">>", ".*"],       "carapace", ""],
+]
+
+####################################################################################################
+# Preview settings
+####################################################################################################
+[PREVIEW]
+
+# An ordered list of preview table, where the format of the key is MIME type splitted
+# by "/". You are able to check the file MIME type by the command `file --mime <filepath>`.
+previews = [
+
+    # Text files: preview using batcat.
+    ["text/*", "batcat --color=always --paging=never --style=plain --theme=ansi --line-range=:64 {path}"],
+
+    # Archive file: list archive contents.
+    ["*/x-7z-compressed", "timeout 0.1s 7z l    {path}"],
+    ["*/zip",             "timeout 0.1s zipinfo {path}"],
+
+    # Media files: preview using file command.
+    ["audio/*", "timeout 0.1s file {path}"],
+    ["image/*", "timeout 0.1s file {path}"],
+    ["video/*", "timeout 0.1s file {path}"],
+]
+
+# Delimiter of the preview window.
+preview_delim = " \u2502 "
+
+# Ratio of the preview window.
+preview_ratio = 0.45
+
+####################################################################################################
+# Plugins settings
+####################################################################################################
+[PLUGIN_OMNIPICKER]
+
+# Width of the filer windows.
+w1_ratio = 0.25
+w2_ratio = 0.45
+
+# Preview command for text files. Empty string means default preview.
+preview_cmd_txt = "batcat --color=always --paging=never --style=plain --theme=ansi --line-range=:64 {path}"
+
+# Preview command for binary files. Empty string means default preview.
+preview_cmd_bin = "xxd {path} | head -n 64"
+
+# Path to the history file.
+path_history = "~/.bash_history"
+
+# Process command for listing processes.
+ps_command = "ps aux"
+
+# The index of PID field in the output of "ps_command" above.
+idx_pid_field = 1
+
+# vim: expandtab tabstop=4 shiftwidth=4

@@ -1,0 +1,188 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// C++ source file: read_cmd.cxx                                                                ///
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Include the primary header.
+#include "read_cmd.hxx"
+
+// Include the headers of custom modules.
+#include "async_comp.hxx"
+#include "char_x.hxx"
+#include "config.hxx"
+#include "edit_helper.hxx"
+#include "history_manager.hxx"
+#include "terminal.hxx"
+#include "text_editor_emacs.hxx"
+#include "text_editor_vi.hxx"
+#include "utf8.hxx"
+#include "utils.hxx"
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// File-local functions
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Unnamed namespace for making classes and functions file-local.
+namespace
+{
+    std::unique_ptr<TextEditor> create_editor(StringView editor_name, StringView lhs_ini, StringView rhs_ini, const Deque<String>& hists)
+    // Factory function to create a TextEditor instance based on the specified editor name.
+    //
+    // [Args]
+    //   editor_name (StringView)          : [IN] Name of the text editor to create ("emacs" or "vi").
+    //   lhs_ini     (StringView)          : [IN] Initial left-hand side string for the text editor.
+    //   rhs_ini     (StringView)          : [IN] Initial right-hand side string for the text editor.
+    //   hists       (const Deque<String>&): [IN] History list for the text editor.
+    //
+    // [Returns]
+    //   (std::unique_ptr<TextEditor>): A unique pointer to the created TextEditor instance.
+    //
+    {   // {{{
+
+        switch (hash(editor_name))
+        {
+            case hash("emacs"): return std::make_unique<TextEditorEmacs>(lhs_ini, rhs_ini, hists);
+            case hash("vi")   : return std::make_unique<TextEditorVi>   (lhs_ini, rhs_ini, hists);
+            default           : return std::make_unique<TextEditorEmacs>(lhs_ini, rhs_ini, hists);
+        }
+
+    }   // }}}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Published functions
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ReadCmdOut readcmd(StringView lhs_ini, StringView rhs_ini, const Deque<String>& hists, StringView editor_name,
+                   const Path& outdir, StringView inputs, const RedAlienConfig& cfg)
+{   // {{{
+
+    // Set of keys that stops readcmd function.
+    Set<StringView> stop_keys;
+    for (const auto& pair : cfg.plugin_trigger_keys)
+        stop_keys.emplace(pair.first);
+
+    // Parse the key codes for completion and history completion.
+    const char keycode_cand_comp = CharX::parse_printable_char(cfg.cand_comp_key);
+    const char keycode_hist_comp = CharX::parse_printable_char(cfg.hist_comp_key);
+
+    // Get terminal size.
+    const Size term_size = get_terminal_size();
+
+    // Instantiate necessary classes.
+    HistManager histmn = HistManager(hists);
+
+    // Instantiate a text editor based on the specified editor name.
+    UniqPtr<TextEditor> editor = create_editor(editor_name, lhs_ini, rhs_ini, hists);
+
+    // Get prefix and postfix strings for history completion.
+    StringView histhint_pre  = StringView(cfg.histhint_pre);
+    StringView histhint_post = StringView(cfg.histhint_post);
+
+    // Asynchronous completion is used only for interactive input mode.
+    const bool use_async_compl = inputs.empty();
+
+    // Exactly one EditHelper exists in this function:
+    //   - use_async_compl == true : opt_async_compl owns it (accessed via complete_sync).
+    //   - use_async_compl == false: opt_edit_helper owns it.
+    Optional<EditHelper> opt_edit_helper;
+    Optional<AsyncComp>  opt_async_compl;
+    if (use_async_compl) { opt_async_compl.emplace(cfg.area_height, term_size.cols, outdir, cfg); }
+    else                 { opt_edit_helper.emplace(cfg.area_height, term_size.cols, outdir, cfg); }
+
+    // NOTE: TermUserIF is declared at the end intentionally, because the object destruction
+    // order is the reverse of the declaration, so the terminal is restored to canonical mode
+    // before any completion machinery is destroyed.
+    TermUserIF termui = TermUserIF(cfg.area_height, term_size.cols);
+
+    while (true)
+    {
+        // Get editing buffer.
+        // NOTE: that these variables are invalidated after "editor.edit()".
+        //       Do not store or use them beyond the "editor.edit()" call.
+        const StringView lhs = editor->get_lhs();
+        const StringView rhs = editor->get_rhs();
+
+        // Launch asynchronous completion for the current user input.
+        if (use_async_compl)
+            opt_async_compl->launch_async_completion(lhs);
+
+        // Get completion candidates.
+        Vector<String> clines = use_async_compl ? opt_async_compl->get_completion_result()
+                                                : opt_edit_helper->candidate(lhs);
+
+        // Get history completion.
+        StringView hist_comp = histmn.complete(lhs);
+
+        // Select ps1 buffer.
+        const StringView ps1 = StringView((editor->get_mode() == TextEditor::Mode::INSERT) ? cfg.ps1i : cfg.ps1n);
+        const StringView ps2 = StringView(cfg.ps2);
+
+        // Re-draw terminal.
+        termui.update(lhs, rhs, ps1, ps2, clines, hist_comp, histhint_pre, histhint_post);
+
+        // Get user input.
+        CharX cx = (inputs.size() > 0) ? utf8_decode_next_charx(inputs.data())
+                                       : termui.getch(use_async_compl ? opt_async_compl->get_wakeup_fd() : -1);
+
+        // Do nothing if the character is empty.
+        if (cx.size() == 0) continue;
+
+        // Update the "inputs" view if it is used for non-interactive input mode.
+        inputs = (inputs.size() > 0) ? (StringView(inputs.begin() + cx.size(), inputs.end())) : inputs;
+
+        // Exit if one of the stop key is typed.
+        if (stop_keys.contains(cx.printable()))
+            return ReadCmdOut(lhs, rhs, cx.printable(), inputs);
+
+        // Execute the command if the input is a multi-byte character.
+        if (cx.size() > 1)
+            editor->edit(cx.view());
+
+        // Otherwise (size is 1), process the input character.
+        else
+        {
+            // Get the input character.
+            char c = *cx.c_str();
+
+            // Exit function if Ctrl-C is pressed.
+            if ((c == 0x00) or (c == 0x03))
+                return ReadCmdOut("^C", "", "", inputs);
+
+            // Exit function if Ctrl-D is pressed and the editing buffer is empty (except for vi command mode).
+            else if ((c == 0x04) and ((editor_name != "vi") or (editor->get_mode() == TextEditor::Mode::INSERT)) and editor->empty())
+                return ReadCmdOut("^D", "", "", inputs);
+
+            // History completion.
+            else if (c == keycode_hist_comp)
+            {
+                if (not hist_comp.empty())
+                    editor->set(String(lhs) + String(hist_comp) + " ", rhs);
+            }
+
+            // Execute completion.
+            else if (c == keycode_cand_comp)
+            {
+                if (use_async_compl)
+                {
+                    editor->set(opt_async_compl->complete_sync(lhs), rhs);
+                }
+                else
+                {
+                    opt_edit_helper->candidate(lhs);
+                    editor->set(opt_edit_helper->complete(lhs), rhs);
+                }
+            }
+
+            // Exit function if ENTER is pressed.
+            else if ((c == '\n') or (c == '\r'))
+                return ReadCmdOut(lhs, rhs, "", inputs);
+
+            // Otherwise update editing buffer.
+            else
+                editor->edit(cx.view());
+        }
+    }
+
+}   // }}}
+
+// vim: expandtab tabstop=4 shiftwidth=4 fdm=marker

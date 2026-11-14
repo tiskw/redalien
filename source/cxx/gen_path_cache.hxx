@@ -1,0 +1,27 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// C++ header file: gen_path_cache.hxx                                                          ///
+///                                                                                              ///
+/// Generate the cache of available command names in the directories specified in the "PATH"     ///
+/// environment variable.                                                                        ///
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#ifndef GEN_PATH_CACHE_HXX
+#define GEN_PATH_CACHE_HXX
+
+// Include the headers of custom modules.
+#include "config.hxx"
+#include "dtypes.hxx"
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Public functions
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+int32_t generate_path_commands_cache(void);
+// Print all commands in PATH environment variable.
+//
+// [Returns]
+//   (int32_t): EXIT_SUCCESS if no error occurred, otherwise EXIT_FAILURE.
+
+#endif
+
+// vim: expandtab tabstop=4 shiftwidth=4 fdm=marker
